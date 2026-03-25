@@ -177,8 +177,6 @@ Teams must design and implement a solution addressing the following:
 - Unit tests  
 - README  
 
----
-
 ## 🐳 5. Nice to Have  
 ```bash
 docker-compose up
