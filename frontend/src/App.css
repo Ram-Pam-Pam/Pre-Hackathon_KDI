@@ -1,24 +1,24 @@
 /* --- Theme Variables --- */
 .standard-theme {
-  --bg-color: #f1f5f9;
+  --bg-color: #f8fafc; /* Wymuszone jasne tło */
   --card-bg: #ffffff;
-  --text-primary: #0f172a;
+  --text-primary: #0f172a; /* Wymuszony ciemny tekst */
   --text-secondary: #64748b;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --danger: #ef4444;
   --success: #10b981;
   --border: #cbd5e1;
-  --dropzone-bg: #f8fafc;
+  --dropzone-bg: #f1f5f9;
   --font-base: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .kaiju-theme {
-  --bg-color: #050505;
-  --card-bg: rgba(20, 5, 5, 0.85);
-  --text-primary: #ffedd5;
+  --bg-color: #020617; /* Mroczne tło */
+  --card-bg: rgba(15, 23, 42, 0.9);
+  --text-primary: #fef3c7; /* Jasny tekst */
   --text-secondary: #fca5a5;
-  --accent: #b91c1c;
+  --accent: #dc2626;
   --accent-hover: #991b1b;
   --danger: #ef4444;
   --success: #f59e0b; 
@@ -31,20 +31,22 @@
 body {
   margin: 0;
   padding: 0;
-  background-color: var(--bg-color);
-  color: var(--text-primary);
-  font-family: var(--font-base);
-  transition: background-color 0.3s ease, color 0.3s ease;
-  -webkit-font-smoothing: antialiased;
 }
 
+/* Przeniesienie kontroli nad kolorami na główny kontener aplikacji */
 .app-wrapper {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  width: 100%;
   position: relative;
   overflow: hidden;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  font-family: var(--font-base);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
 }
 
 .layout-container {
@@ -221,7 +223,7 @@ body {
 }
 
 .json-viewer {
-  background-color: #0f172a;
+  background-color: #0f172a; /* Ciemne tło JSONA w obu trybach zapewnia lepszy kontrast kodu */
   padding: 1rem;
   border-radius: 4px;
   overflow-x: auto;
@@ -263,10 +265,10 @@ body {
   width: 200px;
   height: 250px;
   transform-origin: bottom center;
-  animation: walk 12s linear infinite;
+  animation: walk 8s linear infinite; /* Zmniejszony czas animacji: chodzi znacznie szybciej */
   
-  /* Green color palette */
-  --gz-color: #14532d; 
+  /* Wzmocniona zieleń */
+  --gz-color: #166534; 
   --gz-highlight: #4ade80;
 }
 
@@ -312,7 +314,7 @@ body {
   box-shadow: 0 0 10px #ef4444;
 }
 
-/* Fire breath effect replacing the laser */
+/* Fire breath effect */
 .gz-fire {
   position: absolute;
   top: 25px;
@@ -382,9 +384,9 @@ body {
 }
 
 @keyframes walk {
-  /* scale(2) to make the Godzilla 2x bigger */
-  0% { transform: translateX(-30vw) scale(2); }
-  100% { transform: translateX(120vw) scale(2); }
+  /* Zwiększono skalę z 2 do 2.2 */
+  0% { transform: translateX(-30vw) scale(2.2); }
+  100% { transform: translateX(120vw) scale(2.2); }
 }
 
 @keyframes fireBreath {
