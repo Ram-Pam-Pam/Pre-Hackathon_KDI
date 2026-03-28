@@ -1,27 +1,27 @@
-python
-pycache/
+# python
+__pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
 
-venv
+# venv
 **/venv/
 .venv/
 env/
 
-frontend (node)
+# frontend (node)
 node_modules/
 dist/
 dist-ssr/
-.log
+*.log
 
-env / config
+# env / config
 .env
-.env.
+.env.*
 !.env.example
 *.sqlite3
 
-os / ide
+# os / ide
 .vscode/
 .idea/
 .DS_Store
