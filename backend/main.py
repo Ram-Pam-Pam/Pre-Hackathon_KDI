@@ -19,20 +19,29 @@ def read_root():
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
-    # czytamy naglowek zeby sprawdzic magic bytes
     header = await file.read(2048)
     await file.seek(0)
     
     kind = filetype.guess(header)
     
     if kind is None:
-        # proste sprawdzenie dla plikow tekstowych
-        if not file.filename.endswith(('.txt', '.csv', '.md')):
+        # weryfikacja plikow tekstowych/xml pod katem xss
+        if file.filename.lower().endswith('.svg'):
+            content = await file.read()
+            await file.seek(0)
+            
+            # dekodujemy do tekstu zeby poszukac zlosliwych tagow
+            text_content = content.decode('utf-8', errors='ignore').lower()
+            if "<script" in text_content or "javascript:" in text_content:
+                raise HTTPException(status_code=415, detail="Wykryto zlosliwy kod (XSS) w pliku SVG")
+            actual_mime = "image/svg+xml"
+            
+        elif not file.filename.lower().endswith(('.txt', '.csv', '.md')):
             raise HTTPException(status_code=415, detail="Nieobslugiwany format pliku")
-        actual_mime = "text/plain"
+        else:
+            actual_mime = "text/plain"
     else:
         actual_mime = kind.mime
-        # blokujemy pliki typu exe udajace np jpg
         if actual_mime not in ALLOWED_MIMETYPES:
             raise HTTPException(status_code=415, detail="Wykryto nieprawidlowy typ pliku")
 
