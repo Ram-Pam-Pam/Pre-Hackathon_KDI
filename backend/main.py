@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
 import filetype
 import shutil
 import os
@@ -17,15 +18,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# rozszerzona lista typow
 ALLOWED_MIMETYPES = [
     "application/pdf",
     "image/jpeg",
-    "image/png"
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp"
 ]
 
 UPLOAD_DIR = "uploads"
-
-# upewniamy sie ze folder na pliki istnieje zanim cos do niego wrzucimy
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @app.get("/")
@@ -45,7 +48,7 @@ async def upload_file(file: UploadFile = File(...)):
             await file.seek(0)
             text_content = content.decode('utf-8', errors='ignore').lower()
             if "<script" in text_content or "javascript:" in text_content:
-                raise HTTPException(status_code=415, detail="Wykryto zlosliwy kod (XSS) w pliku SVG")
+                raise HTTPException(status_code=415, detail="Wykryto zlosliwy kod (XSS) in SVG")
             actual_mime = "image/svg+xml"
         elif not file.filename.lower().endswith(('.txt', '.csv', '.md')):
             raise HTTPException(status_code=415, detail="Nieobslugiwany format pliku")
@@ -53,17 +56,39 @@ async def upload_file(file: UploadFile = File(...)):
             actual_mime = "text/plain"
     else:
         actual_mime = kind.mime
+        # wypisuje w konsoli co serwer wykryl
+        print(f"DEBUG: Wykryto typ: {actual_mime} dla pliku {file.filename}")
+        
         if actual_mime not in ALLOWED_MIMETYPES:
-            raise HTTPException(status_code=415, detail="Wykryto nieprawidlowy typ pliku")
+            raise HTTPException(status_code=415, detail=f"Nieprawidlowy typ pliku: {actual_mime}")
 
-    # ZAPISYWANIE PLIKU NA DYSK
     file_path = os.path.join(UPLOAD_DIR, file.filename)
+    
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+
+    # czyszczenie grafiki
+    if actual_mime.startswith("image/") and actual_mime != "image/svg+xml":
+        try:
+            with Image.open(file_path) as img:
+                clean_img = img.convert("RGB")
+                clean_img.save(file_path, "JPEG", quality=85)
+                actual_mime = "image/jpeg"
+        except Exception as e:
+            print(f"Blad Pillow: {e}")
+            # jesli pillow nie umie otworzyc, to moze byc fake jpg
+            raise HTTPException(status_code=415, detail="Uszkodzony lub podejrzany plik graficzny")
 
     return {
         "status": "success",
         "filename": file.filename,
-        "saved_path": file_path,
         "detected_type": actual_mime
     }
+
+@app.get("/api/files")
+def list_files():
+    try:
+        files = os.listdir(UPLOAD_DIR)
+        return {"files": files}
+    except Exception:
+        return {"files": []}
