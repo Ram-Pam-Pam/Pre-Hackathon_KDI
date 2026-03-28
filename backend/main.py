@@ -92,3 +92,11 @@ def list_files():
         return {"files": files}
     except Exception:
         return {"files": []}
+
+# pobieranie przetworzonego pliku
+@app.get("/api/download/{filename}")
+async def download_file(filename: str):
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Nie znaleziono pliku")
+    return FileResponse(path=file_path, filename=filename)
