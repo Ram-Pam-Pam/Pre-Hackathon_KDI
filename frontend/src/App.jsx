@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import axios from 'axios'
 import './App.css'
 
@@ -8,6 +8,7 @@ function App() {
   const [fileList, setFileList] = useState([])
   const [kaijuMode, setKaijuMode] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [expandedRow, setExpandedRow] = useState(null)
   const fileInputRef = useRef(null)
 
   const fetchFiles = async () => {
@@ -56,6 +57,14 @@ function App() {
 
   const toggleKaijuMode = () => {
     setKaijuMode(!kaijuMode)
+  }
+
+  const toggleDetails = (index) => {
+    setExpandedRow(expandedRow === index ? null : index)
+  }
+
+  const handleDownload = (filename) => {
+    window.open(`http://localhost:8000/api/download/${filename}`, '_blank')
   }
 
   const handleUpload = async () => {
@@ -175,15 +184,34 @@ function App() {
                     <tr>
                       <th>Filename</th>
                       <th>Status</th>
+                      <th className="text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {fileList.map((f, index) => (
-                      <tr key={index}>
-                        <td className="file-cell">{f.filename || f}</td>
-                        <td><span className="status-badge safe">SANITIZED</span></td>
-                      </tr>
-                    ))}
+                    {fileList.map((f, index) => {
+                      const fileName = f.filename || f
+                      return (
+                        <Fragment key={index}>
+                          <tr>
+                            <td className="file-cell">{fileName}</td>
+                            <td><span className="status-badge safe">SANITIZED</span></td>
+                            <td className="text-right actions-cell">
+                              <button className="action-btn" onClick={() => toggleDetails(index)}>Details</button>
+                              <button className="action-btn" onClick={() => handleDownload(fileName)}>Download</button>
+                            </td>
+                          </tr>
+                          {expandedRow === index && (
+                            <tr className="details-row">
+                              <td colSpan="3">
+                                <div className="details-content">
+                                  <pre>{JSON.stringify(f, null, 2)}</pre>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

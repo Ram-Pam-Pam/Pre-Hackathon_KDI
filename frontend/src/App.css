@@ -452,3 +452,50 @@ body {
   0% { transform: scaleX(0.8) scaleY(0.9) rotate(5deg); border-left-color: #ea580c; }
   100% { transform: scaleX(1.2) scaleY(1.2) rotate(-5deg); border-left-color: #fef08a; }
 }
+
+.text-right {
+  text-align: right;
+}
+
+.actions-cell {
+  white-space: nowrap;
+}
+
+.action-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-left: 6px;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.details-row td {
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.details-content {
+  background-color: var(--status-bg);
+  padding: 1rem;
+}
+
+.details-content pre {
+  margin: 0;
+  color: #34d399;
+  background-color: #0f172a;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+}
