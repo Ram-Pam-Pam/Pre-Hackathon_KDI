@@ -56,7 +56,6 @@ body {
   position: relative;
   z-index: 10;
   width: 100%;
-  /* Zwiększono max-width z 650px na 850px, aby tabela zmieściła przyciski */
   max-width: 850px;
   padding: 2rem;
 }
@@ -260,6 +259,34 @@ body {
   color: #ffffff;
 }
 
+.btn-approve-all {
+  background-color: transparent;
+  color: var(--success);
+  border: 1px solid var(--success);
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-approve-all:hover {
+  background-color: var(--success);
+  color: #ffffff;
+}
+
+.kaiju-theme .btn-approve-all {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.kaiju-theme .btn-approve-all:hover {
+  background-color: var(--accent);
+  color: #ffffff;
+}
+
 .table-responsive {
   width: 100%;
   overflow-x: auto;
@@ -271,11 +298,9 @@ body {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.85rem;
-  /* Zmieniono table-layout na auto, aby kolumny mogły się dostosować do treści przycisków */
   table-layout: auto;
 }
 
-/* Skorygowano szerokości kolumn */
 .data-table th:nth-child(1) {
   width: 35%;
 }
@@ -306,7 +331,6 @@ body {
 
 .file-cell {
   font-weight: 600;
-  /* Ograniczono szerokość komórki z nazwą, aby nie wypychała przycisków */
   max-width: 180px;
   position: relative;
   cursor: default;
@@ -388,7 +412,6 @@ body {
 
 .actions-cell {
   white-space: nowrap;
-  /* Flexbox pomaga utrzymać przyciski w równej linii i odpowiednim odstępie */
   display: flex;
   justify-content: flex-end;
   gap: 4px;
@@ -398,7 +421,6 @@ body {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-primary);
-  /* Zmniejszono padding boczny, by przyciski były węższe */
   padding: 5px 8px;
   border-radius: 4px;
   font-size: 0.65rem;
@@ -644,10 +666,10 @@ body {
 .preview-canvas {
   max-width: 100%;
   height: auto;
-  cursor: crosshair;
   touch-action: none;
   display: block;
   margin: 0 auto;
+  box-shadow: 0 0 20px rgba(0,0,0,0.2); 
 }
 
 .canvas-instructions {

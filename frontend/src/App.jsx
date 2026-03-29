@@ -210,14 +210,12 @@ function App() {
     }
   }
 
-  // NOWA FUNKCJA USUWANIA
   const handleDelete = async (fileName) => {
     if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
 
     try {
       await axios.delete(`http://localhost:8000/api/files/${encodeURIComponent(fileName)}`);
       
-      // Lokalna aktualizacja stanów
       setFileList(prev => prev.filter(f => (f.filename || f) !== fileName));
       setApprovedFiles(prev => {
         const next = new Set(prev);
@@ -237,6 +235,11 @@ function App() {
   const handleApprove = (fileName) => {
     setApprovedFiles(prev => new Set(prev).add(fileName))
   }
+
+  const handleApproveAll = () => {
+    const allFileNames = fileList.map(f => f.filename || f);
+    setApprovedFiles(new Set(allFileNames));
+  };
 
   const handleNoteChange = (fileName, text) => {
     setFileNotes(prev => ({ ...prev, [fileName]: text }))
@@ -396,6 +399,13 @@ function App() {
               <h3>Secured Vault</h3>
               <div className="header-actions">
                 <span className="badge-success">{fileList.length} Files</span>
+                
+                {fileList.length > 0 && approvedFiles.size < fileList.length && (
+                  <button className="btn-approve-all" onClick={handleApproveAll}>
+                    Approve All
+                  </button>
+                )}
+
                 {approvedFiles.size > 0 && (
                   <button className="btn-export" onClick={handleExportJSON}>
                     Export JSON
@@ -442,10 +452,9 @@ function App() {
                               {isApproved && (
                                 <button className="action-btn" onClick={() => handleDownload(fileName)}>Download</button>
                               )}
-                              {/* PRZYCISK DELETE */}
                               <button 
                                 className="action-btn" 
-                                style={{ color: '#ef4444', borderColor: '#7f1d1d' }} 
+                                style={{ color: '#ef4444', borderColor: '#ef4444' }} 
                                 onClick={() => handleDelete(fileName)}
                               >
                                 Delete
