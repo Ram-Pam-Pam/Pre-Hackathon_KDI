@@ -210,6 +210,30 @@ function App() {
     }
   }
 
+  // NOWA FUNKCJA USUWANIA
+  const handleDelete = async (fileName) => {
+    if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
+
+    try {
+      await axios.delete(`http://localhost:8000/api/files/${encodeURIComponent(fileName)}`);
+      
+      // Lokalna aktualizacja stanów
+      setFileList(prev => prev.filter(f => (f.filename || f) !== fileName));
+      setApprovedFiles(prev => {
+        const next = new Set(prev);
+        next.delete(fileName);
+        return next;
+      });
+      
+      if (expandedRow !== null) setExpandedRow(null);
+      setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' });
+      
+    } catch (error) {
+      console.error(error);
+      alert("Failed to delete file.");
+    }
+  };
+
   const handleApprove = (fileName) => {
     setApprovedFiles(prev => new Set(prev).add(fileName))
   }
@@ -224,13 +248,11 @@ function App() {
   }
 
   const handleExportJSON = () => {
-    const batchId = crypto.randomUUID(); // Unikalny ID całego wsadu/paczki
+    const batchId = crypto.randomUUID(); 
     
     const exportData = Array.from(approvedFiles).map(fileName => {
       const fileData = fileList.find(f => (f.filename || f) === fileName) || {}
-      const baseData = typeof fileData === 'string' ? { filename: fileData } : fileData
-      
-      // Tworzymy relacje - wskazujemy inne pliki z tego samego eksportu
+      const baseData = typeof fileData === 'string' ? { filename: fileName } : fileData
       const related = Array.from(approvedFiles).filter(f => f !== fileName);
       
       return {
@@ -420,6 +442,14 @@ function App() {
                               {isApproved && (
                                 <button className="action-btn" onClick={() => handleDownload(fileName)}>Download</button>
                               )}
+                              {/* PRZYCISK DELETE */}
+                              <button 
+                                className="action-btn" 
+                                style={{ color: '#ef4444', borderColor: '#7f1d1d' }} 
+                                onClick={() => handleDelete(fileName)}
+                              >
+                                Delete
+                              </button>
                             </td>
                           </tr>
                           {expandedRow === index && (

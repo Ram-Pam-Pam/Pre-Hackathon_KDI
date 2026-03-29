@@ -155,3 +155,14 @@ async def update_file(filename: str, file_data: FileContent):
         return {"status": "success", "message": "File updated successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/files/{filename}")
+async def delete_file(filename: str):
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        os.remove(file_path)
+        return {"status": "success", "message": f"File {filename} deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
