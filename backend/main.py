@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from PIL import Image
 import filetype
 import shutil
@@ -86,17 +87,22 @@ async def upload_file(file: UploadFile = File(...)):
     }
 
 @app.get("/api/files")
-def list_files():
-    try:
-        files = os.listdir(UPLOAD_DIR)
-        return {"files": files}
-    except Exception:
-        return {"files": []}
+async def list_files():
+    files_list = []
+    for filename in os.listdir(UPLOAD_DIR):
+        path = os.path.join(UPLOAD_DIR, filename)
+        if os.path.isfile(path):
+            files_list.append({
+                "filename": filename,
+                "status": "CLEANED",
+                "size_kb": round(os.path.getsize(path) / 1024, 2),
+                "extension": filename.split('.')[-1].upper()
+            })
+    return files_list
 
-# pobieranie przetworzonego pliku
 @app.get("/api/download/{filename}")
 async def download_file(filename: str):
     file_path = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Nie znaleziono pliku")
+        raise HTTPException(status_code=404, detail="Not found")
     return FileResponse(path=file_path, filename=filename)
