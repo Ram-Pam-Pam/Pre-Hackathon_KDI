@@ -12,7 +12,7 @@ function App() {
   
   const [approvedFiles, setApprovedFiles] = useState(new Set())
   const [fileNotes, setFileNotes] = useState({})
-  const [previewContent, setPreviewContent] = useState({ type: 'idle', data: null })
+  const [previewContent, setPreviewContent] = useState({ type: 'idle', data: null, isEditing: false, editBuffer: '' })
 
   const fileInputRef = useRef(null)
 
@@ -67,12 +67,12 @@ function App() {
   const toggleDetails = async (index, fileName) => {
     if (expandedRow === index) {
       setExpandedRow(null)
-      setPreviewContent({ type: 'idle', data: null })
+      setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' })
       return
     }
 
     setExpandedRow(index)
-    setPreviewContent({ type: 'loading', data: 'Loading preview...' })
+    setPreviewContent({ type: 'loading', data: 'Loading preview...', isEditing: false, editBuffer: '' })
 
     try {
       const response = await fetch(`http://localhost:8000/api/download/${fileName}`)
@@ -86,21 +86,34 @@ function App() {
       const fileExt = fileName.split('.').pop().toLowerCase()
 
       if (mimeType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'svg'].includes(fileExt)) {
-        setPreviewContent({ type: 'image', data: URL.createObjectURL(blob) })
+        setPreviewContent({ type: 'image', data: URL.createObjectURL(blob), isEditing: false, editBuffer: '' })
       } else if (mimeType === 'application/pdf' || fileExt === 'pdf') {
-        setPreviewContent({ type: 'pdf', data: URL.createObjectURL(blob) })
+        setPreviewContent({ type: 'pdf', data: URL.createObjectURL(blob), isEditing: false, editBuffer: '' })
       } else if (mimeType.startsWith('text/') || ['txt', 'md', 'csv'].includes(fileExt)) {
         if (blob.size > 2 * 1024 * 1024) {
-          setPreviewContent({ type: 'error', data: 'File is too large for text preview (Max 2MB).' })
+          setPreviewContent({ type: 'error', data: 'File is too large for text preview (Max 2MB).', isEditing: false, editBuffer: '' })
         } else {
           const textData = await blob.text()
-          setPreviewContent({ type: 'text', data: textData || '(File is empty)' })
+          setPreviewContent({ type: 'text', data: textData || '(File is empty)', isEditing: false, editBuffer: textData || '' })
         }
       } else {
-        setPreviewContent({ type: 'error', data: 'Preview format not supported.' })
+        setPreviewContent({ type: 'error', data: 'Preview format not supported.', isEditing: false, editBuffer: '' })
       }
     } catch (error) {
-      setPreviewContent({ type: 'error', data: 'Preview not available.' })
+      setPreviewContent({ type: 'error', data: 'Preview not available.', isEditing: false, editBuffer: '' })
+    }
+  }
+
+  const handleSaveEdit = async (fileName) => {
+    try {
+      await axios.put(`http://localhost:8000/api/files/${fileName}`, {
+        content: previewContent.editBuffer
+      })
+      setPreviewContent({ ...previewContent, data: previewContent.editBuffer, isEditing: false })
+      fetchFiles()
+    } catch (error) {
+      console.error(error)
+      alert("Failed to save changes.")
     }
   }
 
@@ -332,7 +345,32 @@ function App() {
                                     <div className="preview-container">
                                       {previewContent.type === 'loading' && <span className="preview-text">Loading preview...</span>}
                                       {previewContent.type === 'error' && <span className="preview-text error">{previewContent.data}</span>}
-                                      {previewContent.type === 'text' && <pre className="preview-text">{previewContent.data}</pre>}
+                                      
+                                      {previewContent.type === 'text' && (
+                                        <div className="text-editor-container">
+                                          {previewContent.isEditing ? (
+                                            <>
+                                              <textarea
+                                                className="preview-textarea"
+                                                value={previewContent.editBuffer}
+                                                onChange={(e) => setPreviewContent({ ...previewContent, editBuffer: e.target.value })}
+                                              />
+                                              <div className="editor-actions">
+                                                <button className="action-btn" onClick={() => setPreviewContent({ ...previewContent, isEditing: false })}>Cancel</button>
+                                                <button className="action-btn approve-btn" onClick={() => handleSaveEdit(fileName)}>Save Changes</button>
+                                              </div>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <pre className="preview-text">{previewContent.data}</pre>
+                                              <div className="editor-actions">
+                                                <button className="action-btn" onClick={() => setPreviewContent({ ...previewContent, isEditing: true })}>Edit Data</button>
+                                              </div>
+                                            </>
+                                          )}
+                                        </div>
+                                      )}
+
                                       {previewContent.type === 'image' && <img src={previewContent.data} alt="Preview" className="preview-image" />}
                                       {previewContent.type === 'pdf' && <iframe src={previewContent.data} title="PDF Preview" className="preview-pdf" />}
                                     </div>

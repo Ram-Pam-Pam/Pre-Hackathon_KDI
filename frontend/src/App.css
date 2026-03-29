@@ -517,6 +517,38 @@ body {
   border-color: var(--accent);
 }
 
+.text-editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.preview-textarea {
+  width: 100%;
+  min-height: 200px;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.8rem;
+  color: var(--text-primary);
+  font-family: monospace;
+  font-size: 0.8rem;
+  resize: vertical;
+}
+
+.preview-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(-5px); }
   to { opacity: 1; transform: translateY(0); }
