@@ -9,6 +9,11 @@ function App() {
   const [kaijuMode, setKaijuMode] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [expandedRow, setExpandedRow] = useState(null)
+  
+  const [approvedFiles, setApprovedFiles] = useState(new Set())
+  const [fileNotes, setFileNotes] = useState({})
+  const [previewContent, setPreviewContent] = useState({ type: 'idle', data: null })
+
   const fileInputRef = useRef(null)
 
   const fetchFiles = async () => {
@@ -59,8 +64,39 @@ function App() {
     setKaijuMode(!kaijuMode)
   }
 
-  const toggleDetails = (index) => {
-    setExpandedRow(expandedRow === index ? null : index)
+  const toggleDetails = async (index, fileName) => {
+    if (expandedRow === index) {
+      setExpandedRow(null)
+      setPreviewContent({ type: 'idle', data: null })
+      return
+    }
+
+    setExpandedRow(index)
+    setPreviewContent({ type: 'loading', data: 'Loading preview...' })
+
+    try {
+      const response = await axios.get(`http://localhost:8000/api/download/${fileName}`, {
+        responseType: 'blob'
+      })
+      const mimeType = response.data.type
+
+      if (mimeType.startsWith('image/')) {
+        setPreviewContent({ type: 'image', data: URL.createObjectURL(response.data) })
+      } else {
+        const text = await response.data.text()
+        setPreviewContent({ type: 'text', data: text })
+      }
+    } catch (error) {
+      setPreviewContent({ type: 'error', data: 'Preview not available.' })
+    }
+  }
+
+  const handleApprove = (fileName) => {
+    setApprovedFiles(prev => new Set(prev).add(fileName))
+  }
+
+  const handleNoteChange = (fileName, text) => {
+    setFileNotes(prev => ({ ...prev, [fileName]: text }))
   }
 
   const handleDownload = (filename) => {
@@ -137,6 +173,7 @@ function App() {
                 type="file" 
                 ref={fileInputRef} 
                 onChange={handleFileChange} 
+                accept=".pdf,.txt,.md,.csv,.svg,.jpg,.jpeg,.png"
                 style={{ display: 'none' }} 
               />
               
@@ -187,19 +224,31 @@ function App() {
                   <tbody>
                     {fileList.map((f, index) => {
                       const fileName = f.filename || f
+                      const isApproved = approvedFiles.has(fileName)
+
                       return (
                         <Fragment key={index}>
                           <tr>
-                            {/* POPRAWIONA KOMÓRKA Z DYMKIEM */}
                             <td className="file-cell">
                               <span className="tooltip-trigger" data-tooltip={fileName}>
                                 {fileName}
                               </span>
                             </td>
-                            <td><span className="status-badge safe">SANITIZED</span></td>
+                            <td>
+                              {isApproved ? (
+                                <span className="status-badge safe">APPROVED</span>
+                              ) : (
+                                <span className="status-badge review">NEEDS REVIEW</span>
+                              )}
+                            </td>
                             <td className="text-right actions-cell">
-                              <button className="action-btn" onClick={() => toggleDetails(index)}>Details</button>
-                              <button className="action-btn" onClick={() => handleDownload(fileName)}>Download</button>
+                              <button className="action-btn" onClick={() => toggleDetails(index, fileName)}>Details</button>
+                              {!isApproved && (
+                                <button className="action-btn approve-btn" onClick={() => handleApprove(fileName)}>Approve</button>
+                              )}
+                              {isApproved && (
+                                <button className="action-btn" onClick={() => handleDownload(fileName)}>Download</button>
+                              )}
                             </td>
                           </tr>
                           {expandedRow === index && (
@@ -223,6 +272,26 @@ function App() {
                                       <span className="detail-label">Security Check</span>
                                       <span className="detail-value success-text">PASSED</span>
                                     </div>
+                                  </div>
+
+                                  <div className="preview-section">
+                                    <span className="detail-label">Sanitized Data Preview</span>
+                                    <div className="preview-container">
+                                      {previewContent.type === 'loading' && <span className="preview-text">Loading preview...</span>}
+                                      {previewContent.type === 'error' && <span className="preview-text error">{previewContent.data}</span>}
+                                      {previewContent.type === 'text' && <pre className="preview-text">{previewContent.data}</pre>}
+                                      {previewContent.type === 'image' && <img src={previewContent.data} alt="Preview" className="preview-image" />}
+                                    </div>
+                                  </div>
+
+                                  <div className="enrichment-section">
+                                    <span className="detail-label">Context Enrichment (Tags / Notes)</span>
+                                    <textarea 
+                                      className="notes-input" 
+                                      placeholder="Operator notes, extracted PII info, metadata enrichment..."
+                                      value={fileNotes[fileName] || ''}
+                                      onChange={(e) => handleNoteChange(fileName, e.target.value)}
+                                    />
                                   </div>
                                 </div>
                               </td>

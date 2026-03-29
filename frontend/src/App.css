@@ -8,6 +8,7 @@
   --accent-hover: #1d4ed8;
   --danger: #ef4444;
   --success: #10b981;
+  --warning: #f59e0b;
   --border: #cbd5e1;
   --dropzone-bg: #f1f5f9;
   --status-bg: #f8fafc;
@@ -23,7 +24,8 @@
   --accent: #dc2626;
   --accent-hover: #991b1b;
   --danger: #ef4444;
-  --success: #f59e0b; 
+  --success: #10b981; 
+  --warning: #f59e0b;
   --border: #7f1d1d;
   --dropzone-bg: rgba(0, 0, 0, 0.4);
   --status-bg: rgba(0, 0, 0, 0.2);
@@ -261,7 +263,7 @@ body {
   white-space: nowrap;
 }
 
-.file-cell:hover::after {
+.tooltip-trigger:hover::after {
   content: attr(data-tooltip);
   position: absolute;
   bottom: 125%;
@@ -279,25 +281,26 @@ body {
   animation: tooltipFadeIn 0.2s ease-out;
 }
 
-.file-cell:hover::before {
+.tooltip-trigger:hover::before {
   content: '';
   position: absolute;
   bottom: 110%;
   left: 50%;
   transform: translateX(-50%);
-  border: 6px solid transparent;
-  border-top-color: var(--text-primary);
+  border-width: 6px;
+  border-style: solid;
+  border-color: var(--text-primary) transparent transparent transparent;
   z-index: 1000;
   pointer-events: none;
   animation: tooltipFadeIn 0.2s ease-out;
 }
 
-.kaiju-theme .file-cell:hover::after {
+.kaiju-theme .tooltip-trigger:hover::after {
   background-color: var(--accent);
   color: #ffffff;
 }
 
-.kaiju-theme .file-cell:hover::before {
+.kaiju-theme .tooltip-trigger:hover::before {
   border-top-color: var(--accent);
 }
 
@@ -312,6 +315,12 @@ body {
   background-color: rgba(16, 185, 129, 0.1);
   color: var(--success);
   border: 1px solid var(--success);
+}
+
+.status-badge.review {
+  background-color: rgba(245, 158, 11, 0.1);
+  color: var(--warning);
+  border: 1px solid var(--warning);
 }
 
 .text-right { text-align: right; }
@@ -333,6 +342,16 @@ body {
 .action-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.action-btn.approve-btn {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.action-btn.approve-btn:hover {
+  background-color: var(--warning);
+  color: #ffffff;
 }
 
 .details-row td {
@@ -375,6 +394,72 @@ body {
 .success-text { color: var(--success); }
 
 .kaiju-theme .detail-value.highlight { color: var(--accent); }
+
+.preview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 1rem;
+  margin-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+}
+
+.preview-container {
+  width: 100%;
+  max-height: 250px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--card-bg);
+  padding: 1rem;
+}
+
+.preview-text {
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  color: var(--text-primary);
+  font-family: monospace;
+}
+
+.preview-text.error {
+  color: var(--danger);
+  font-weight: bold;
+}
+
+.preview-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.enrichment-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 1rem;
+  margin-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+}
+
+.notes-input {
+  width: 100%;
+  min-height: 80px;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.8rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.notes-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(-5px); }
