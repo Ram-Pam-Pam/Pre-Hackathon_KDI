@@ -5,6 +5,7 @@ from PIL import Image
 import filetype
 import shutil
 import os
+import re
 
 app = FastAPI(
     title="The Data Refinery API",
@@ -19,7 +20,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# rozszerzona lista typow
 ALLOWED_MIMETYPES = [
     "application/pdf",
     "image/jpeg",
@@ -32,6 +32,13 @@ ALLOWED_MIMETYPES = [
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+def redact_pii(text: str) -> str:
+    text = re.sub(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', '[REDACTED EMAIL]', text)
+    text = re.sub(r'\b\d{11}\b', '[REDACTED PESEL]', text)
+    text = re.sub(r'\b(?:\d[ -]*?){13,16}\b', '[REDACTED CC]', text)
+    text = re.sub(r'(?i)(?:\+48|0048)? ?[1-9]\d{2} ?\d{3} ?\d{3}', '[REDACTED PHONE]', text)
+    return text
+
 @app.get("/")
 def read_root():
     return {"status": "ok"}
@@ -42,6 +49,7 @@ async def upload_file(file: UploadFile = File(...)):
     await file.seek(0)
     
     kind = filetype.guess(header)
+    actual_mime = None
     
     if kind is None:
         if file.filename.lower().endswith('.svg'):
@@ -49,18 +57,17 @@ async def upload_file(file: UploadFile = File(...)):
             await file.seek(0)
             text_content = content.decode('utf-8', errors='ignore').lower()
             if "<script" in text_content or "javascript:" in text_content:
-                raise HTTPException(status_code=415, detail="Wykryto zlosliwy kod (XSS) in SVG")
+                raise HTTPException(status_code=415, detail="Wykryto zlosliwy kod (XSS) w SVG")
             actual_mime = "image/svg+xml"
-        elif not file.filename.lower().endswith(('.txt', '.csv', '.md')):
-            raise HTTPException(status_code=415, detail="Nieobslugiwany format pliku")
-        else:
+        elif file.filename.lower().endswith(('.txt', '.csv', '.md')):
             actual_mime = "text/plain"
+        else:
+            raise HTTPException(status_code=415, detail="Nieobslugiwany format pliku")
     else:
         actual_mime = kind.mime
-        # wypisuje w konsoli co serwer wykryl
         print(f"DEBUG: Wykryto typ: {actual_mime} dla pliku {file.filename}")
         
-        if actual_mime not in ALLOWED_MIMETYPES:
+        if actual_mime not in ALLOWED_MIMETYPES and not actual_mime.startswith('text/'):
             raise HTTPException(status_code=415, detail=f"Nieprawidlowy typ pliku: {actual_mime}")
 
     file_path = os.path.join(UPLOAD_DIR, file.filename)
@@ -68,16 +75,35 @@ async def upload_file(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # czyszczenie grafiki
-    if actual_mime.startswith("image/") and actual_mime != "image/svg+xml":
+    if actual_mime == "text/plain" or file.filename.lower().endswith(('.txt', '.csv', '.md')):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            cleaned_content = redact_pii(content)
+            
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(cleaned_content)
+        except Exception as e:
+            print(f"Blad przetwarzania tekstu: {e}")
+
+    elif actual_mime.startswith("image/") and actual_mime != "image/svg+xml":
         try:
             with Image.open(file_path) as img:
                 clean_img = img.convert("RGB")
-                clean_img.save(file_path, "JPEG", quality=85)
+                
+                new_filename = file.filename.rsplit('.', 1)[0] + '.jpg'
+                new_file_path = os.path.join(UPLOAD_DIR, new_filename)
+                
+                clean_img.save(new_file_path, "JPEG", quality=85)
+                
+                if new_filename != file.filename:
+                    os.remove(file_path)
+                    file.filename = new_filename
+                
                 actual_mime = "image/jpeg"
         except Exception as e:
             print(f"Blad Pillow: {e}")
-            # jesli pillow nie umie otworzyc, to moze byc fake jpg
             raise HTTPException(status_code=415, detail="Uszkodzony lub podejrzany plik graficzny")
 
     return {
