@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./backend
+    container_name: data-refinery-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads 
+
+  frontend:
+    build: ./frontend
+    container_name: data-refinery-ui
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
