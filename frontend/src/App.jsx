@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, Fragment } from 'react'
 import axios from 'axios'
 import './App.css'
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 function App() {
   const [file, setFile] = useState(null)
   const [status, setStatus] = useState({ type: 'idle', message: '' })
@@ -29,7 +31,7 @@ function App() {
 
   const fetchFiles = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/files')
+      const response = await axios.get('${API_URL}/api/files')
       const files = response.data.files || response.data || []
       setFileList(Array.isArray(files) ? files : [])
     } catch (error) {
@@ -154,7 +156,7 @@ function App() {
 
     try {
       const timestamp = new Date().getTime()
-      const response = await axios.get(`http://localhost:8000/api/download/${encodeURIComponent(fileName)}?t=${timestamp}`, {
+      const response = await axios.get(`${API_URL}/api/download/${encodeURIComponent(fileName)}?t=${timestamp}`, {
         responseType: 'blob'
       })
       
@@ -197,7 +199,7 @@ function App() {
     }
 
     try {
-      await axios.put(`http://localhost:8000/api/files/${encodeURIComponent(fileName)}`, {
+      await axios.put(`${API_URL}/api/files/${encodeURIComponent(fileName)}`, {
         content: payloadContent
       })
       
@@ -217,7 +219,7 @@ function App() {
     if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
 
     try {
-      await axios.delete(`http://localhost:8000/api/files/${encodeURIComponent(fileName)}`);
+      await axios.delete(`${API_URL}/api/files/${encodeURIComponent(fileName)}`);
       
       setFileList(prev => prev.filter(f => (f.filename || f) !== fileName));
       setApprovedFiles(prev => {
@@ -250,7 +252,7 @@ function App() {
 
   const handleDownload = (filename) => {
     const timestamp = new Date().getTime()
-    window.open(`http://localhost:8000/api/download/${encodeURIComponent(filename)}?t=${timestamp}`, '_blank')
+    window.open(`${API_URL}/api/download/${encodeURIComponent(filename)}?t=${timestamp}`, '_blank')
   }
 
   const handleDownloadAll = async () => {
@@ -260,7 +262,7 @@ function App() {
     
     try {
       const filenames = Array.from(approvedFiles);
-      const response = await axios.post('http://localhost:8000/api/download-batch', {
+      const response = await axios.post('${API_URL}/api/download-batch', {
         filenames: filenames
       }, {
         responseType: 'blob' 
@@ -333,7 +335,7 @@ function App() {
     setStatus({ type: 'loading', message: 'Analyzing payload...' })
 
     try {
-      await axios.post('http://localhost:8000/api/upload', formData, {
+      await axios.post('${API_URL}/api/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       
