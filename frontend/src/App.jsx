@@ -31,7 +31,7 @@ function App() {
 
   const fetchFiles = async () => {
     try {
-      const response = await axios.get('${API_URL}/api/files')
+      const response = await axios.get(`${API_URL}/api/files`)
       const files = response.data.files || response.data || []
       setFileList(Array.isArray(files) ? files : [])
     } catch (error) {
@@ -262,7 +262,7 @@ function App() {
     
     try {
       const filenames = Array.from(approvedFiles);
-      const response = await axios.post('${API_URL}/api/download-batch', {
+      const response = await axios.post(`${API_URL}/api/download-batch`, {
         filenames: filenames
       }, {
         responseType: 'blob' 
@@ -335,7 +335,7 @@ function App() {
     setStatus({ type: 'loading', message: 'Analyzing payload...' })
 
     try {
-      await axios.post('${API_URL}/api/upload', formData, {
+      await axios.post(`${API_URL}/api/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       
