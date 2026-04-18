@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, Fragment } from 'react'
 import axios from 'axios'
 import './App.css'
+import JSZip from 'jszip'
 import { supabase } from './supabase'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -255,7 +256,47 @@ function App() {
   const handleDownload = (fileRecord) => window.open(fileRecord.file_url, '_blank')
 
   const handleDownloadAll = async () => {
-    alert("Funkcja pobierania paczki ZIP wymaga dostępu do lokalnego systemu plików backendu. W trybie chmurowym (Supabase) jest zablokowana.");
+    if (approvedFiles.size === 0) return;
+    
+    setIsDownloadingZip(true);
+
+    try {
+      const zip = new JSZip();
+      const filenames = Array.from(approvedFiles);
+
+      // Pobieramy każdy zatwierdzony plik z Supabase
+      for (const fileName of filenames) {
+        const fileRecord = fileList.find(f => (f.filename || f) === fileName);
+        if (!fileRecord || !fileRecord.file_url) continue;
+
+        // Fetchujemy plik z chmury jako Blob (surowe dane)
+        const response = await fetch(fileRecord.file_url);
+        if (!response.ok) throw new Error(`Nie udało się pobrać ${fileName}`);
+        const blob = await response.blob();
+
+        // Dodajemy plik do wirtualnej paczki ZIP
+        zip.file(fileName, blob);
+      }
+
+      // Generujemy gotową paczkę
+      const zipContent = await zip.generateAsync({ type: 'blob' });
+      
+      // Tworzymy ukryty link i wymuszamy pobieranie na komputer
+      const url = URL.createObjectURL(zipContent);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'secured_vault.zip';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+    } catch (error) {
+      console.error(error);
+      alert("Failed to download ZIP archive.");
+    } finally {
+      setIsDownloadingZip(false);
+    }
   };
 
   const handleExportJSON = () => {
