@@ -2,9 +2,8 @@ import { useState, useRef, useEffect, Fragment } from 'react'
 import axios from 'axios'
 import './App.css'
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
 import { collection, addDoc, getDocs, deleteDoc, doc } from 'firebase/firestore'
-import { auth, db, storage } from './firebase'
+import { auth, db } from './firebase'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -269,10 +268,6 @@ function App() {
     if (!window.confirm(`Are you sure you want to delete ${fileObj.filename}?`)) return;
 
     try {
-      // Usuwamy z Magazynu (Firebase Storage)
-      const storageRef = ref(storage, `users/${user.uid}/files/${fileObj.filename}`);
-      await deleteObject(storageRef);
-      
       // Usuwamy wpis z Bazy Danych (Firestore)
       await deleteDoc(doc(db, `users/${user.uid}/files`, fileObj.id));
       
@@ -392,20 +387,26 @@ function App() {
       // 1. Backend filtruje plik i odsyła nam CZYSTE bajty
       const response = await axios.post(`${API_URL}/api/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        responseType: 'blob' // Mówimy, że oczekujemy pliku!
+        responseType: 'blob' 
       })
       
-      setStatus({ type: 'loading', message: 'Uploading clean payload to Secure Vault...' })
+      setStatus({ type: 'loading', message: 'Uploading clean payload to Cloudinary...' })
 
-      // 2. Wrzucamy czysty plik do Firebase Storage do TWOJEGO prywatnego folderu
+      // 2. Wrzucamy czysty plik do CLOUDINARY
       const cleanBlob = response.data;
-      const storageRef = ref(storage, `users/${user.uid}/files/${file.name}`);
-      await uploadBytes(storageRef, cleanBlob);
-      
-      // 3. Pobieramy link do tego pliku z chmury
-      const downloadUrl = await getDownloadURL(storageRef);
+      const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+      const uploadPreset = import.meta.env.VITE_CLOUDINARY_PRESET;
 
-      // 4. Tworzymy wpis w Bazie Danych Firestore
+      const cloudFormData = new FormData();
+      cloudFormData.append('file', cleanBlob, file.name);
+      cloudFormData.append('upload_preset', uploadPreset);
+
+      const cloudRes = await axios.post(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, cloudFormData);
+      
+      // Cloudinary odsyła nam gotowy, bezpieczny link do pliku!
+      const downloadUrl = cloudRes.data.secure_url;
+
+      // 3. Tworzymy wpis w Bazie Danych Firestore (żebyś widział to w tabelce)
       await addDoc(collection(db, `users/${user.uid}/files`), {
         filename: file.name,
         url: downloadUrl,
@@ -417,7 +418,7 @@ function App() {
 
       setStatus({ type: 'success', message: 'Payload verified and safely stored.' })
       setFile(null)
-      fetchFiles() // Odświeżamy tabelkę!
+      fetchFiles()
     } catch (error) {
       console.error(error)
       const errorMsg = error.response?.data?.detail || 'Critical error during upload'
