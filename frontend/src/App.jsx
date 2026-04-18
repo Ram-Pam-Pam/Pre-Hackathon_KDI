@@ -15,62 +15,69 @@ function App() {
   
   const [approvedFiles, setApprovedFiles] = useState(new Set())
   const [fileNotes, setFileNotes] = useState({})
-  
   const [previewContent, setPreviewContent] = useState({ type: 'idle', data: null, isEditing: false, editBuffer: '' })
   
   const [isDrawing, setIsDrawing] = useState(false)
   const [editTool, setEditTool] = useState('brush') 
   const [editColor, setEditColor] = useState('#000000')
   const [canvasSnapshot, setCanvasSnapshot] = useState(null)
-  
-  // --- STANY FIREBASE AUTH ---
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false)
+
+  // --- STANY SUPABASE AUTH ---
   const [user, setUser] = useState(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState('')
   const [isRegistering, setIsRegistering] = useState(false)
-
-
-  // NOWY STAN DO ŁADOWANIA ZIPA
-  const [isDownloadingZip, setIsDownloadingZip] = useState(false)
+  const [isAuthLoading, setIsAuthLoading] = useState(true)
 
   const fileInputRef = useRef(null)
   const canvasRef = useRef(null)
   const startPosRef = useRef({ x: 0, y: 0 })
 
-  // --- LOGIKA FIREBASE AUTH ---
+  // --- LOGIKA SUPABASE AUTH ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser)
+    // Sprawdź, czy użytkownik jest już zalogowany przy starcie
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null)
+      setIsAuthLoading(false)
     })
-    return () => unsubscribe()
+
+    // Nasłuchuj zmian logowania/wylogowania
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   const handleLogin = async (e) => {
     e.preventDefault()
-    try {
-      await signInWithEmailAndPassword(auth, email, password)
-      setAuthError('')
-    } catch (error) {
-      setAuthError('Login error: Invalid Operator ID or Passcode.')
-    }
+    setAuthError('')
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) setAuthError('Login error: ' + error.message)
   }
 
   const handleRegister = async (e) => {
     e.preventDefault()
-    try {
-      await createUserWithEmailAndPassword(auth, email, password)
-      setAuthError('')
-    } catch (error) {
+    setAuthError('')
+    const { error } = await supabase.auth.signUp({ email, password })
+    if (error) {
       setAuthError('Registration error: ' + error.message)
+    } else {
+      setAuthError('Registration successful! You can now log in.')
+      setIsRegistering(false)
     }
   }
 
   const handleLogout = async () => {
-    await signOut(auth)
+    await supabase.auth.signOut()
   }
 
+  // --- POBIERANIE PLIKÓW ---
   const fetchFiles = async () => {
+    if (!user) return; // Pobieraj tylko dla zalogowanego
+
     try {
       const { data, error } = await supabase.from('files').select('*').order('created_at', { ascending: false })
       if (error) throw error
@@ -80,11 +87,13 @@ function App() {
     }
   }
 
-  // Odpalamy pobieranie plików, gdy tylko user się zaloguje!
   useEffect(() => {
-    fetchFiles()
+    if (user) {
+      fetchFiles()
+    }
   }, [user])
 
+  // --- RESZTA LOGIKI KANWY I EDYCJI ---
   useEffect(() => {
     if (previewContent.isEditing && previewContent.type === 'image' && canvasRef.current) {
       const canvas = canvasRef.current
@@ -97,6 +106,7 @@ function App() {
         ctx.lineCap = 'round'
         ctx.lineJoin = 'round'
       }
+      img.crossOrigin = "anonymous"
       img.src = previewContent.data
     }
   }, [previewContent.isEditing, previewContent.data, previewContent.type])
@@ -159,16 +169,8 @@ function App() {
     }
   }
 
-  const handleDragOver = (e) => {
-    e.preventDefault()
-    setIsDragging(true)
-  }
-
-  const handleDragLeave = (e) => {
-    e.preventDefault()
-    setIsDragging(false)
-  }
-
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true) }
+  const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false) }
   const handleDrop = (e) => {
     e.preventDefault()
     setIsDragging(false)
@@ -178,13 +180,8 @@ function App() {
     }
   }
 
-  const triggerFileInput = () => {
-    fileInputRef.current.click()
-  }
-
-  const toggleKaijuMode = () => {
-    setKaijuMode(!kaijuMode)
-  }
+  const triggerFileInput = () => fileInputRef.current.click()
+  const toggleKaijuMode = () => setKaijuMode(!kaijuMode)
 
   const toggleDetails = async (index, fileRecord) => {
     if (expandedRow === index) {
@@ -225,31 +222,12 @@ function App() {
   }
 
   const handleSaveEdit = async (fileName) => {
-    let payloadContent = previewContent.editBuffer
-
-    if (previewContent.type === 'image') {
-      payloadContent = canvasRef.current.toDataURL('image/jpeg', 0.9)
-    }
-
-    try {
-      await axios.put(`${API_URL}/api/files/${encodeURIComponent(fileName)}`, {
-        content: payloadContent
-      })
-      
-      setPreviewContent({ 
-        ...previewContent, 
-        data: previewContent.type === 'image' ? payloadContent : previewContent.editBuffer, 
-        isEditing: false 
-      })
-      fetchFiles()
-    } catch (error) {
-      console.error(error)
-      alert("Failed to save changes.")
-    }
+    // Alert informacyjny dla dema
+    alert("W wersji w pełni serwerowej (Supabase), zapisywanie edycji grafiki wymaga stworzenia nowego obiektu Blob i nadpisania go w Supabase Storage. Ta funkcja została tymczasowo zablokowana by nie generować błędów.");
+    setPreviewContent({ ...previewContent, isEditing: false });
   }
 
   const handleDelete = async (fileRecord) => {
-    // Uwaga: fileRecord to teraz cały obiekt z Supabase, więc bierzemy z niego filename
     const fileName = fileRecord.filename || fileRecord; 
     
     if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
@@ -271,56 +249,17 @@ function App() {
     }
   };
 
-  const handleApprove = (fileName) => {
-    setApprovedFiles(prev => new Set(prev).add(fileName))
-  }
-
-  const handleApproveAll = () => {
-    const allFileNames = fileList.map(f => f.filename || f);
-    setApprovedFiles(new Set(allFileNames));
-  };
-
-  const handleNoteChange = (fileName, text) => {
-    setFileNotes(prev => ({ ...prev, [fileName]: text }))
-  }
-
-  const handleDownload = (fileRecord) => {
-    // fileRecord to obiekt z Supabase
-    window.open(fileRecord.file_url, '_blank')
-  }
+  const handleApprove = (fileName) => setApprovedFiles(prev => new Set(prev).add(fileName))
+  const handleApproveAll = () => setApprovedFiles(new Set(fileList.map(f => f.filename || f)))
+  const handleNoteChange = (fileName, text) => setFileNotes(prev => ({ ...prev, [fileName]: text }))
+  const handleDownload = (fileRecord) => window.open(fileRecord.file_url, '_blank')
 
   const handleDownloadAll = async () => {
-    if (approvedFiles.size === 0) return;
-    
-    setIsDownloadingZip(true); // Ustawiamy stan ładowania na true
-    
-    try {
-      const filenames = Array.from(approvedFiles);
-      const response = await axios.post(`${API_URL}/api/download-batch`, {
-        filenames: filenames
-      }, {
-        responseType: 'blob' 
-      });
-      
-      const url = URL.createObjectURL(response.data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'secured_vault.zip';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error(error);
-      alert("Failed to download ZIP archive.");
-    } finally {
-      setIsDownloadingZip(false); // Niezależnie od sukcesu/błędu odblokowujemy przycisk
-    }
+    alert("Funkcja pobierania paczki ZIP wymaga dostępu do lokalnego systemu plików backendu. W trybie chmurowym (Supabase) jest zablokowana.");
   };
 
   const handleExportJSON = () => {
     const batchId = crypto.randomUUID(); 
-    
     const exportData = Array.from(approvedFiles).map(fileName => {
       const fileData = fileList.find(f => (f.filename || f) === fileName) || {}
       const baseData = typeof fileData === 'string' ? { filename: fileName } : fileData
@@ -330,27 +269,17 @@ function App() {
         document_id: crypto.randomUUID(),
         batch_id: batchId,
         source_origin: "Gateway_Upload_Terminal_01",
-        relations: {
-          part_of_batch: true,
-          related_files: related
-        },
+        relations: { part_of_batch: true, related_files: related },
         ...baseData,
         operator_notes: fileNotes[fileName] || 'No extra context provided.',
         export_timestamp: new Date().toISOString()
       }
     })
 
-    const vaultSchema = {
-      schema_version: "1.2",
-      export_session_id: batchId,
-      total_files: exportData.length,
-      exported_vault: exportData
-    }
-
+    const vaultSchema = { schema_version: "1.2", export_session_id: batchId, total_files: exportData.length, exported_vault: exportData }
     const dataStr = JSON.stringify(vaultSchema, null, 2)
     const blob = new Blob([dataStr], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
-    
     const link = document.createElement('a')
     link.href = url
     link.download = `data_refinery_export_${batchId.split('-')[0]}.json`
@@ -368,20 +297,20 @@ function App() {
     setStatus({ type: 'loading', message: 'Analyzing payload...' })
 
     try {
-      // API FastAPI sprawdza czy plik jest wirusem
+      // 1. Backend sprawdza plik (wirusy itp)
       await axios.post(`${API_URL}/api/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       
       setStatus({ type: 'loading', message: 'Payload secured. Uploading to Supabase Vault...' })
 
-      // Wgrywamy plik fizycznie do Supabase (Bucket 'vault')
+      // 2. Upload do Supabase
       const fileExt = file.name.split('.').pop().toLowerCase()
       const filePath = `${Date.now()}_${file.name}`
       const { error: uploadError } = await supabase.storage.from('vault').upload(filePath, file)
       if (uploadError) throw uploadError
 
-      // Zdobywamy publiczny link i zapisujemy do bazy
+      // 3. Link i wpis do bazy
       const { data: urlData } = supabase.storage.from('vault').getPublicUrl(filePath)
       const { error: dbError } = await supabase.from('files').insert([{
         filename: file.name,
@@ -401,7 +330,11 @@ function App() {
     }
   }
 
-  // --- EKRAN BRAMY DOSTĘPOWEJ (JEŚLI NIEZALOGOWANY) ---
+  // --- EKRAN BRAMY DOSTĘPOWEJ (LOGOWANIE SUPABASE) ---
+  if (isAuthLoading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: 'white' }}>Ładowanie sesji...</div>
+  }
+
   if (!user) {
     return (
       <div className={`app-wrapper standard-theme`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
@@ -602,7 +535,7 @@ function App() {
                                 <button className="action-btn approve-btn" onClick={() => handleApprove(fileName)}>Approve</button>
                               )}
                               {isApproved && (
-                                <button className="action-btn" onClick={() => window.open(f.url, '_blank')}>Download</button>
+                                <button className="action-btn" onClick={() => window.open(f.file_url, '_blank')}>Download</button>
                               )}
                               <button 
                                 className="action-btn" 
