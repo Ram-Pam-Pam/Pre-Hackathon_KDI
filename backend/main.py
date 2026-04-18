@@ -1,6 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from PIL import Image
 import filetype
@@ -53,17 +53,16 @@ def read_root():
 
 @app.post("/api/upload")
 async def upload_file(file: UploadFile = File(...)):
-    header = await file.read(2048)
-    await file.seek(0)
+    # 1. Czytanie pliku do pamięci
+    content_bytes = await file.read()
+    header = content_bytes[:2048]
     
     kind = filetype.guess(header)
     actual_mime = None
     
     if kind is None:
         if file.filename.lower().endswith('.svg'):
-            content = await file.read()
-            await file.seek(0)
-            text_content = content.decode('utf-8', errors='ignore').lower()
+            text_content = content_bytes.decode('utf-8', errors='ignore').lower()
             if "<script" in text_content or "javascript:" in text_content:
                 raise HTTPException(status_code=415, detail="Wykryto zlosliwy kod (XSS) w SVG")
             actual_mime = "image/svg+xml"
@@ -74,51 +73,33 @@ async def upload_file(file: UploadFile = File(...)):
     else:
         actual_mime = kind.mime
         print(f"DEBUG: Wykryto typ: {actual_mime} dla pliku {file.filename}")
-        
         if actual_mime not in ALLOWED_MIMETYPES and not actual_mime.startswith('text/'):
             raise HTTPException(status_code=415, detail=f"Nieprawidlowy typ pliku: {actual_mime}")
 
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
+    # 2. Czyszczenie i odsyłanie BEZ zapisu na dysk
     if actual_mime == "text/plain" or file.filename.lower().endswith(('.txt', '.csv', '.md')):
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            
-            cleaned_content = redact_pii(content)
-            
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(cleaned_content)
+            text_str = content_bytes.decode('utf-8')
+            cleaned_content = redact_pii(text_str)
+            return Response(content=cleaned_content.encode('utf-8'), media_type="text/plain")
         except Exception as e:
-            print(f"Blad przetwarzania tekstu: {e}")
+            raise HTTPException(status_code=500, detail=f"Blad przetwarzania tekstu: {e}")
 
     elif actual_mime.startswith("image/") and actual_mime != "image/svg+xml":
         try:
-            with Image.open(file_path) as img:
-                clean_img = img.convert("RGB")
-                
-                new_filename = file.filename.rsplit('.', 1)[0] + '.jpg'
-                new_file_path = os.path.join(UPLOAD_DIR, new_filename)
-                
-                clean_img.save(new_file_path, "JPEG", quality=85)
-                
-                if new_filename != file.filename:
-                    os.remove(file_path)
-                    file.filename = new_filename
-                
-                actual_mime = "image/jpeg"
+            img = Image.open(io.BytesIO(content_bytes))
+            clean_img = img.convert("RGB")
+            
+            img_byte_arr = io.BytesIO()
+            clean_img.save(img_byte_arr, format='JPEG', quality=85)
+            img_bytes = img_byte_arr.getvalue()
+            
+            return Response(content=img_bytes, media_type="image/jpeg")
         except Exception as e:
-            print(f"Blad Pillow: {e}")
             raise HTTPException(status_code=415, detail="Uszkodzony lub podejrzany plik graficzny")
-
-    return {
-        "status": "success",
-        "filename": file.filename,
-        "detected_type": actual_mime
-    }
+            
+    # Dla np. PDF odsyłamy to samo co przyszło (jeszcze nie mamy filtru PDF)
+    return Response(content=content_bytes, media_type=actual_mime)
 
 @app.get("/api/files")
 async def list_files():
