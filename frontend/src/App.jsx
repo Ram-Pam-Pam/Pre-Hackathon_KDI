@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, Fragment } from 'react'
 import axios from 'axios'
 import './App.css'
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
+import { auth } from './firebase'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -22,12 +24,52 @@ function App() {
   const [editColor, setEditColor] = useState('#000000')
   const [canvasSnapshot, setCanvasSnapshot] = useState(null)
   
+  // --- STANY FIREBASE AUTH ---
+  const [user, setUser] = useState(null)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [isRegistering, setIsRegistering] = useState(false)
+
+
   // NOWY STAN DO ŁADOWANIA ZIPA
   const [isDownloadingZip, setIsDownloadingZip] = useState(false)
 
   const fileInputRef = useRef(null)
   const canvasRef = useRef(null)
   const startPosRef = useRef({ x: 0, y: 0 })
+
+  // --- LOGIKA FIREBASE AUTH ---
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser)
+    })
+    return () => unsubscribe()
+  }, [])
+
+  const handleLogin = async (e) => {
+    e.preventDefault()
+    try {
+      await signInWithEmailAndPassword(auth, email, password)
+      setAuthError('')
+    } catch (error) {
+      setAuthError('Login error: Invalid Operator ID or Passcode.')
+    }
+  }
+
+  const handleRegister = async (e) => {
+    e.preventDefault()
+    try {
+      await createUserWithEmailAndPassword(auth, email, password)
+      setAuthError('')
+    } catch (error) {
+      setAuthError('Registration error: ' + error.message)
+    }
+  }
+
+  const handleLogout = async () => {
+    await signOut(auth)
+  }
 
   const fetchFiles = async () => {
     try {
@@ -348,6 +390,56 @@ function App() {
     }
   }
 
+  // --- EKRAN BRAMY DOSTĘPOWEJ (JEŚLI NIEZALOGOWANY) ---
+  if (!user) {
+    return (
+      <div className={`app-wrapper standard-theme`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div className="card" style={{ maxWidth: '400px', width: '100%', padding: '2rem' }}>
+          <h2 style={{ textAlign: 'center', marginBottom: '1.5rem', color: '#38bdf8' }}>
+            {isRegistering ? 'Create Operator ID' : 'Gateway Access'}
+          </h2>
+          <form onSubmit={isRegistering ? handleRegister : handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <input 
+              type="email" 
+              placeholder="Operator ID (Email)" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              required 
+              className="notes-input"
+              style={{ minHeight: 'auto', padding: '0.75rem' }}
+            />
+            <input 
+              type="password" 
+              placeholder="Passcode (min. 6 chars)" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+              required 
+              className="notes-input"
+              style={{ minHeight: 'auto', padding: '0.75rem' }}
+            />
+            <button type="submit" className="btn-primary">
+              {isRegistering ? 'Register & Enter' : 'Authenticate'}
+            </button>
+          </form>
+          
+          <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+            <button 
+              onClick={() => {
+                setIsRegistering(!isRegistering)
+                setAuthError('')
+              }} 
+              style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              {isRegistering ? 'Already have an ID? Login' : 'Need an ID? Register'}
+            </button>
+          </div>
+
+          {authError && <p style={{ color: '#ef4444', marginTop: '1rem', textAlign: 'center' }}>{authError}</p>}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className={`app-wrapper ${kaijuMode ? 'kaiju-theme' : 'standard-theme'}`}>
       
@@ -376,9 +468,14 @@ function App() {
         <header className="header">
           <div className="header-top">
             <h1>The Data Refinery</h1>
-            <button className="mode-toggle" onClick={toggleKaijuMode}>
-              {kaijuMode ? 'DISABLE KAIJU' : 'INIT KAIJU MODE'}
-            </button>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button className="mode-toggle" onClick={toggleKaijuMode}>
+                {kaijuMode ? 'DISABLE KAIJU' : 'INIT KAIJU MODE'}
+              </button>
+              <button className="mode-toggle" onClick={handleLogout} style={{ borderColor: '#ef4444', color: '#ef4444' }}>
+                LOGOUT
+              </button>
+            </div>
           </div>
           <p className="subtitle">Secure Unstructured Data Gateway</p>
         </header>
