@@ -1,9 +1,6 @@
 import { useState, useRef, useEffect, Fragment } from 'react'
 import axios from 'axios'
 import './App.css'
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
-import { collection, addDoc, getDocs, deleteDoc, doc } from 'firebase/firestore'
-import { auth, db } from './firebase'
 import { supabase } from './supabase'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -75,13 +72,11 @@ function App() {
 
   const fetchFiles = async () => {
     try {
-      // Pobieramy listę plików z bazy Supabase (z tabeli 'files')
       const { data, error } = await supabase.from('files').select('*').order('created_at', { ascending: false })
-      
       if (error) throw error
       setFileList(data || [])
     } catch (error) {
-      console.error("Błąd pobierania bazy:", error)
+      console.error("Błąd pobierania bazy Supabase:", error)
     }
   }
 
@@ -191,7 +186,7 @@ function App() {
     setKaijuMode(!kaijuMode)
   }
 
-  const toggleDetails = async (index, fileName) => {
+  const toggleDetails = async (index, fileRecord) => {
     if (expandedRow === index) {
       setExpandedRow(null)
       setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' })
@@ -199,36 +194,27 @@ function App() {
     }
 
     setExpandedRow(index)
-    setPreviewContent({ type: 'loading', data: 'Loading preview...', isEditing: false, editBuffer: '' })
+    
+    if (!fileRecord.file_url) {
+      setPreviewContent({ type: 'error', data: 'Brak adresu URL dla tego pliku.', isEditing: false, editBuffer: '' })
+      return;
+    }
+
+    setPreviewContent({ type: 'loading', data: 'Loading preview from Vault...', isEditing: false, editBuffer: '' })
 
     try {
-      const timestamp = new Date().getTime()
-      const response = await axios.get(`${API_URL}/api/download/${encodeURIComponent(fileName)}?t=${timestamp}`, {
-        responseType: 'blob'
-      })
-      
-      const blob = response.data
-      const mimeType = blob.type || ''
-      const fileExt = fileName.split('.').pop().toLowerCase()
+      const fileExt = fileRecord.extension;
+      const url = fileRecord.file_url;
 
-      if (mimeType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'svg'].includes(fileExt)) {
-        setPreviewContent({ type: 'image', data: URL.createObjectURL(blob), isEditing: false, editBuffer: '' })
-      } else if (mimeType === 'application/pdf' || fileExt === 'pdf') {
-        setPreviewContent({ type: 'pdf', data: URL.createObjectURL(blob), isEditing: false, editBuffer: '' })
-      } else if (mimeType.startsWith('text/') || ['txt', 'md', 'csv'].includes(fileExt)) {
-        if (blob.size > 2 * 1024 * 1024) {
-          setPreviewContent({ type: 'error', data: 'File is too large for text preview (Max 2MB).', isEditing: false, editBuffer: '' })
-        } else {
-          const reader = new FileReader()
-          reader.onload = (e) => {
-            const textResult = e.target.result || '(File is empty)'
-            setPreviewContent({ type: 'text', data: textResult, isEditing: false, editBuffer: textResult })
-          }
-          reader.onerror = () => {
-            setPreviewContent({ type: 'error', data: 'Failed to read text locally.', isEditing: false, editBuffer: '' })
-          }
-          reader.readAsText(blob)
-        }
+      if (['jpg', 'jpeg', 'png', 'svg'].includes(fileExt)) {
+        setPreviewContent({ type: 'image', data: url, isEditing: false, editBuffer: '' })
+      } else if (fileExt === 'pdf') {
+        setPreviewContent({ type: 'pdf', data: url, isEditing: false, editBuffer: '' })
+      } else if (['txt', 'md', 'csv'].includes(fileExt)) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("Network response was not ok");
+        const textData = await response.text();
+        setPreviewContent({ type: 'text', data: textData, isEditing: false, editBuffer: textData })
       } else {
         setPreviewContent({ type: 'error', data: 'Preview format not supported.', isEditing: false, editBuffer: '' })
       }
@@ -262,22 +248,23 @@ function App() {
     }
   }
 
-  const handleDelete = async (fileObj) => {
-    if (!window.confirm(`Are you sure you want to delete ${fileObj.filename}?`)) return;
+  const handleDelete = async (fileRecord) => {
+    // Uwaga: fileRecord to teraz cały obiekt z Supabase, więc bierzemy z niego filename
+    const fileName = fileRecord.filename || fileRecord; 
+    
+    if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
 
     try {
-      // Usuwamy wpis z Bazy Danych (Firestore)
-      await deleteDoc(doc(db, `users/${user.uid}/files`, fileObj.id));
+      await supabase.from('files').delete().eq('filename', fileName);
       
-      // Usuwamy z ekranu
-      setFileList(prev => prev.filter(f => f.id !== fileObj.id));
+      setFileList(prev => prev.filter(f => f.filename !== fileName));
       setApprovedFiles(prev => {
         const next = new Set(prev);
-        next.delete(fileObj.filename);
+        next.delete(fileName);
         return next;
       });
       if (expandedRow !== null) setExpandedRow(null);
-      
+      setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' });
     } catch (error) {
       console.error(error);
       alert("Failed to delete file.");
@@ -381,44 +368,35 @@ function App() {
     setStatus({ type: 'loading', message: 'Analyzing payload...' })
 
     try {
-      // 1. Walidacja przez Twój backend Pythona (utrzymujemy bezpieczeństwo!)
+      // API FastAPI sprawdza czy plik jest wirusem
       await axios.post(`${API_URL}/api/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       
-      setStatus({ type: 'loading', message: 'Payload secured. Uploading to Vault...' })
+      setStatus({ type: 'loading', message: 'Payload secured. Uploading to Supabase Vault...' })
 
-      // 2. Wgrywamy plik fizycznie do Supabase Storage
+      // Wgrywamy plik fizycznie do Supabase (Bucket 'vault')
       const fileExt = file.name.split('.').pop().toLowerCase()
-      const filePath = `${Date.now()}_${file.name}` // unikalna nazwa żeby nie nadpisać
-
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('vault')
-        .upload(filePath, file)
-
+      const filePath = `${Date.now()}_${file.name}`
+      const { error: uploadError } = await supabase.storage.from('vault').upload(filePath, file)
       if (uploadError) throw uploadError
 
-      // 3. Pobieramy publiczny URL do wgranego pliku
+      // Zdobywamy publiczny link i zapisujemy do bazy
       const { data: urlData } = supabase.storage.from('vault').getPublicUrl(filePath)
-      const publicUrl = urlData.publicUrl
-
-      // 4. Zapisujemy wpis o pliku w bazie danych (Tabela 'files')
-      const { error: dbError } = await supabase.from('files').insert([
-        {
-          filename: file.name,
-          size_kb: Math.round(file.size / 1024),
-          extension: fileExt,
-          file_url: publicUrl
-        }
-      ])
-
+      const { error: dbError } = await supabase.from('files').insert([{
+        filename: file.name,
+        size_kb: Math.round(file.size / 1024),
+        extension: fileExt,
+        file_url: urlData.publicUrl
+      }])
+      
       if (dbError) throw dbError
 
-      setStatus({ type: 'success', message: 'Payload verified and locked in Supabase Vault!' })
+      setStatus({ type: 'success', message: 'Payload verified and locked!' })
       setFile(null)
       fetchFiles()
     } catch (error) {
-      setStatus({ type: 'error', message: `Critical Threat or DB Error: ${error.message}` })
+      setStatus({ type: 'error', message: `Critical Threat: ${error.message}` })
       console.error(error)
     }
   }
@@ -619,7 +597,7 @@ function App() {
                               )}
                             </td>
                             <td className="text-right actions-cell">
-                              <button className="action-btn" onClick={() => toggleDetails(index, fileName)}>Details</button>
+                              <button className="action-btn" onClick={() => toggleDetails(index, f)}>Details</button>
                               {!isApproved && (
                                 <button className="action-btn approve-btn" onClick={() => handleApprove(fileName)}>Approve</button>
                               )}
