@@ -316,7 +316,7 @@ function App() {
         filename: file.name,
         size_kb: Math.round(file.size / 1024),
         extension: fileExt,
-        file_url: urlData.publicUrl
+        file_url: urlData.publicUrl,
         user_id: user.id
       }])
       
