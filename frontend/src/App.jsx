@@ -2,7 +2,9 @@ import { useState, useRef, useEffect, Fragment } from 'react'
 import axios from 'axios'
 import './App.css'
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
-import { auth } from './firebase'
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
+import { collection, addDoc, getDocs, deleteDoc, doc } from 'firebase/firestore'
+import { auth, db, storage } from './firebase'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -72,18 +74,24 @@ function App() {
   }
 
   const fetchFiles = async () => {
+    if (!user) return; // Jeśli niezalogowany, nie pobieramy plików
     try {
-      const response = await axios.get(`${API_URL}/api/files`)
-      const files = response.data.files || response.data || []
-      setFileList(Array.isArray(files) ? files : [])
+      // Pobieranie listy z bazy Firestore (tylko dla zalogowanego usera)
+      const querySnapshot = await getDocs(collection(db, `users/${user.uid}/files`));
+      const files = [];
+      querySnapshot.forEach((doc) => {
+        files.push({ id: doc.id, ...doc.data() });
+      });
+      setFileList(files);
     } catch (error) {
-      console.error(error)
+      console.error("Błąd pobierania plików:", error)
     }
   }
 
+  // Odpalamy pobieranie plików, gdy tylko user się zaloguje!
   useEffect(() => {
     fetchFiles()
-  }, [])
+  }, [user])
 
   useEffect(() => {
     if (previewContent.isEditing && previewContent.type === 'image' && canvasRef.current) {
@@ -257,21 +265,25 @@ function App() {
     }
   }
 
-  const handleDelete = async (fileName) => {
-    if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
+  const handleDelete = async (fileObj) => {
+    if (!window.confirm(`Are you sure you want to delete ${fileObj.filename}?`)) return;
 
     try {
-      await axios.delete(`${API_URL}/api/files/${encodeURIComponent(fileName)}`);
+      // Usuwamy z Magazynu (Firebase Storage)
+      const storageRef = ref(storage, `users/${user.uid}/files/${fileObj.filename}`);
+      await deleteObject(storageRef);
       
-      setFileList(prev => prev.filter(f => (f.filename || f) !== fileName));
+      // Usuwamy wpis z Bazy Danych (Firestore)
+      await deleteDoc(doc(db, `users/${user.uid}/files`, fileObj.id));
+      
+      // Usuwamy z ekranu
+      setFileList(prev => prev.filter(f => f.id !== fileObj.id));
       setApprovedFiles(prev => {
         const next = new Set(prev);
-        next.delete(fileName);
+        next.delete(fileObj.filename);
         return next;
       });
-      
       if (expandedRow !== null) setExpandedRow(null);
-      setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' });
       
     } catch (error) {
       console.error(error);
@@ -369,24 +381,47 @@ function App() {
   }
 
   const handleUpload = async () => {
-    if (!file) return
+    if (!file || !user) return
 
     const formData = new FormData()
     formData.append('file', file)
 
-    setStatus({ type: 'loading', message: 'Analyzing payload...' })
+    setStatus({ type: 'loading', message: 'Analyzing payload via Gateway...' })
 
     try {
-      await axios.post(`${API_URL}/api/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      // 1. Backend filtruje plik i odsyła nam CZYSTE bajty
+      const response = await axios.post(`${API_URL}/api/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        responseType: 'blob' // Mówimy, że oczekujemy pliku!
       })
       
-      setStatus({ type: 'success', message: 'Payload verified and sanitized.' })
+      setStatus({ type: 'loading', message: 'Uploading clean payload to Secure Vault...' })
+
+      // 2. Wrzucamy czysty plik do Firebase Storage do TWOJEGO prywatnego folderu
+      const cleanBlob = response.data;
+      const storageRef = ref(storage, `users/${user.uid}/files/${file.name}`);
+      await uploadBytes(storageRef, cleanBlob);
+      
+      // 3. Pobieramy link do tego pliku z chmury
+      const downloadUrl = await getDownloadURL(storageRef);
+
+      // 4. Tworzymy wpis w Bazie Danych Firestore
+      await addDoc(collection(db, `users/${user.uid}/files`), {
+        filename: file.name,
+        url: downloadUrl,
+        status: 'CLEANED',
+        size_kb: Math.round(cleanBlob.size / 1024),
+        extension: file.name.split('.').pop().toUpperCase(),
+        uploadedAt: new Date().toISOString()
+      });
+
+      setStatus({ type: 'success', message: 'Payload verified and safely stored.' })
       setFile(null)
-      fetchFiles()
+      fetchFiles() // Odświeżamy tabelkę!
     } catch (error) {
-      const errorMsg = error.response?.data?.detail || 'Connection error'
-      setStatus({ type: 'error', message: `Critical Threat: ${errorMsg}` })
+      console.error(error)
+      const errorMsg = error.response?.data?.detail || 'Critical error during upload'
+      setStatus({ type: 'error', message: errorMsg })
     }
   }
 
@@ -567,7 +602,7 @@ function App() {
                   </thead>
                   <tbody>
                     {fileList.map((f, index) => {
-                      const fileName = f.filename || f
+                      const fileName = f.filename
                       const isApproved = approvedFiles.has(fileName)
 
                       return (
@@ -591,12 +626,12 @@ function App() {
                                 <button className="action-btn approve-btn" onClick={() => handleApprove(fileName)}>Approve</button>
                               )}
                               {isApproved && (
-                                <button className="action-btn" onClick={() => handleDownload(fileName)}>Download</button>
+                                <button className="action-btn" onClick={() => window.open(f.url, '_blank')}>Download</button>
                               )}
                               <button 
                                 className="action-btn" 
                                 style={{ color: '#ef4444', borderColor: '#ef4444' }} 
-                                onClick={() => handleDelete(fileName)}
+                                onClick={() => handleDelete(f)}
                               >
                                 Delete
                               </button>
