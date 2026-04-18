@@ -4,6 +4,7 @@ import './App.css'
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
 import { collection, addDoc, getDocs, deleteDoc, doc } from 'firebase/firestore'
 import { auth, db } from './firebase'
+import { supabase } from './supabase'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -73,17 +74,14 @@ function App() {
   }
 
   const fetchFiles = async () => {
-    if (!user) return; // Jeśli niezalogowany, nie pobieramy plików
     try {
-      // Pobieranie listy z bazy Firestore (tylko dla zalogowanego usera)
-      const querySnapshot = await getDocs(collection(db, `users/${user.uid}/files`));
-      const files = [];
-      querySnapshot.forEach((doc) => {
-        files.push({ id: doc.id, ...doc.data() });
-      });
-      setFileList(files);
+      // Pobieramy listę plików z bazy Supabase (z tabeli 'files')
+      const { data, error } = await supabase.from('files').select('*').order('created_at', { ascending: false })
+      
+      if (error) throw error
+      setFileList(data || [])
     } catch (error) {
-      console.error("Błąd pobierania plików:", error)
+      console.error("Błąd pobierania bazy:", error)
     }
   }
 
@@ -299,9 +297,9 @@ function App() {
     setFileNotes(prev => ({ ...prev, [fileName]: text }))
   }
 
-  const handleDownload = (filename) => {
-    const timestamp = new Date().getTime()
-    window.open(`${API_URL}/api/download/${encodeURIComponent(filename)}?t=${timestamp}`, '_blank')
+  const handleDownload = (fileRecord) => {
+    // fileRecord to obiekt z Supabase
+    window.open(fileRecord.file_url, '_blank')
   }
 
   const handleDownloadAll = async () => {
@@ -376,53 +374,52 @@ function App() {
   }
 
   const handleUpload = async () => {
-    if (!file || !user) return
+    if (!file) return
 
     const formData = new FormData()
     formData.append('file', file)
-
-    setStatus({ type: 'loading', message: 'Analyzing payload via Gateway...' })
+    setStatus({ type: 'loading', message: 'Analyzing payload...' })
 
     try {
-      // 1. Backend filtruje plik i odsyła nam CZYSTE bajty
-      const response = await axios.post(`${API_URL}/api/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        responseType: 'blob' 
+      // 1. Walidacja przez Twój backend Pythona (utrzymujemy bezpieczeństwo!)
+      await axios.post(`${API_URL}/api/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       })
       
-      setStatus({ type: 'loading', message: 'Uploading clean payload to Cloudinary...' })
+      setStatus({ type: 'loading', message: 'Payload secured. Uploading to Vault...' })
 
-      // 2. Wrzucamy czysty plik do CLOUDINARY
-      const cleanBlob = response.data;
-      const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-      const uploadPreset = import.meta.env.VITE_CLOUDINARY_PRESET;
+      // 2. Wgrywamy plik fizycznie do Supabase Storage
+      const fileExt = file.name.split('.').pop().toLowerCase()
+      const filePath = `${Date.now()}_${file.name}` // unikalna nazwa żeby nie nadpisać
 
-      const cloudFormData = new FormData();
-      cloudFormData.append('file', cleanBlob, file.name);
-      cloudFormData.append('upload_preset', uploadPreset);
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('vault')
+        .upload(filePath, file)
 
-      const cloudRes = await axios.post(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, cloudFormData);
-      
-      // Cloudinary odsyła nam gotowy, bezpieczny link do pliku!
-      const downloadUrl = cloudRes.data.secure_url;
+      if (uploadError) throw uploadError
 
-      // 3. Tworzymy wpis w Bazie Danych Firestore (żebyś widział to w tabelce)
-      await addDoc(collection(db, `users/${user.uid}/files`), {
-        filename: file.name,
-        url: downloadUrl,
-        status: 'CLEANED',
-        size_kb: Math.round(cleanBlob.size / 1024),
-        extension: file.name.split('.').pop().toUpperCase(),
-        uploadedAt: new Date().toISOString()
-      });
+      // 3. Pobieramy publiczny URL do wgranego pliku
+      const { data: urlData } = supabase.storage.from('vault').getPublicUrl(filePath)
+      const publicUrl = urlData.publicUrl
 
-      setStatus({ type: 'success', message: 'Payload verified and safely stored.' })
+      // 4. Zapisujemy wpis o pliku w bazie danych (Tabela 'files')
+      const { error: dbError } = await supabase.from('files').insert([
+        {
+          filename: file.name,
+          size_kb: Math.round(file.size / 1024),
+          extension: fileExt,
+          file_url: publicUrl
+        }
+      ])
+
+      if (dbError) throw dbError
+
+      setStatus({ type: 'success', message: 'Payload verified and locked in Supabase Vault!' })
       setFile(null)
       fetchFiles()
     } catch (error) {
+      setStatus({ type: 'error', message: `Critical Threat or DB Error: ${error.message}` })
       console.error(error)
-      const errorMsg = error.response?.data?.detail || 'Critical error during upload'
-      setStatus({ type: 'error', message: errorMsg })
     }
   }
 
