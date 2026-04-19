@@ -175,36 +175,45 @@ async def download_batch(request: BatchDownloadRequest):
         headers={"Content-Disposition": "attachment; filename=secured_vault.zip"}
     )
 
-# --- OPENCV: AUTOMATYCZNE ZAMAZYWANIE TWARZY ---
+# --- OPENCV: AGRESYWNE ZAMAZYWANIE TWARZY ---
 
-# Wczytujemy darmowy, wbudowany model Haar Cascade do detekcji twarzy od przodu
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+# Wczytujemy TRZY darmowe, wbudowane modele Haar Cascade dla maksymalnej skuteczności
+cascade_frontal = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+cascade_alt = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_alt2.xml')
+cascade_profile = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
 
 @app.post("/api/redact-face")
 async def redact_face(file: UploadFile = File(...)):
-    # 1. Wczytanie pliku jako strumień bajtów
     contents = await file.read()
-    
-    # 2. Zamiana bajtów na tablicę matematyczną zrozumiałą dla OpenCV (Numpy)
     nparr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     
     if img is None:
         raise HTTPException(status_code=400, detail="Nie udało się zdekodować obrazu. Upewnij się, że to poprawny plik JPG/PNG.")
         
-    # 3. Model lepiej i szybciej radzi sobie na obrazach czarno-białych, więc robimy wirtualną kopię
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # 4. Magia AI: Wykrywanie twarzy
-    # scaleFactor i minNeighbors to parametry czułości - możesz je dostroić!
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    # Szukamy twarzy za pomocą 3 różnych modeli (agresywne parametry: scaleFactor=1.05 bada obraz bardzo gęsto)
+    faces_frontal = cascade_frontal.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=4, minSize=(20, 20))
+    faces_alt = cascade_alt.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=4, minSize=(20, 20))
+    faces_profile = cascade_profile.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=4, minSize=(20, 20))
     
-    # 5. Rysujemy czarne prostokąty (0, 0, 0) o współrzędnych twarzy na oryginalnym, kolorowym zdjęciu
-    # -1 oznacza "wypełnij figurę całkowicie"
-    for (x, y, w, h) in faces:
-        cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 0), -1)
+    # Łączymy wszystkie wykrycia z trzech modeli w jedną listę
+    all_faces = list(faces_frontal) + list(faces_alt) + list(faces_profile)
+    
+    # Rysujemy czarne prostokąty z dodanym 15% marginesem, żeby przykryć dokładnie włosy i brodę
+    for (x, y, w, h) in all_faces:
+        margin_x = int(w * 0.15)
+        margin_y = int(h * 0.15)
         
-    # 6. Kodowanie obrazka z powrotem do formatu przesyłanego w internecie
+        # Zapobiegamy wyjściu współrzędnych poza rozmiar obrazka
+        x1 = max(0, x - margin_x)
+        y1 = max(0, y - margin_y)
+        x2 = min(img.shape[1], x + w + margin_x)
+        y2 = min(img.shape[0], y + h + margin_y)
+        
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 0), -1)
+        
     ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'jpg'
     encode_ext = f'.{ext}' if ext in ['png', 'jpg', 'jpeg'] else '.jpg'
     
@@ -214,5 +223,5 @@ async def redact_face(file: UploadFile = File(...)):
         
     media_type = f"image/{'png' if encode_ext == '.png' else 'jpeg'}"
     
-    # 7. Odpowiedź (Zwracamy surowy, zamazany plik wprost do frontendu)
+    from fastapi import Response # (Zostawiam profilaktycznie, gdyby brakowało na górze)
     return Response(content=encoded_img.tobytes(), media_type=media_type)

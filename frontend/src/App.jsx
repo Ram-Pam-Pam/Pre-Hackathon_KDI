@@ -251,7 +251,8 @@ function App() {
 
   // --- POJEDYNCZA REDAKCJA AI OPENCV ---
   const handleIndividualRedact = async (fileRecord) => {
-    setPreviewContent(prev => ({ ...prev, data: 'Wysyłanie do OpenCV...' }));
+    // POPRAWKA: Ustawiamy type na 'loading' zamiast podmieniać link do obrazka na tekst!
+    setPreviewContent({ type: 'loading', data: 'AI Processing: Wysłano ładunek do OpenCV...', isEditing: false, editBuffer: '' });
     
     try {
       const response = await fetch(fileRecord.file_url);
@@ -260,17 +261,15 @@ function App() {
       const formData = new FormData();
       formData.append('file', blob, fileRecord.filename);
       
-      // Wysyłamy obraz do naszego Pythona!
       const pyRes = await axios.post(`${API_URL}/api/redact-face`, formData, { responseType: 'blob' });
       
-      // Odbieramy przerobiony plik i wyświetlamy na płótnie (Canvas) do wglądu
       const newUrl = URL.createObjectURL(pyRes.data);
       setPreviewContent({ type: 'image', data: newUrl, isEditing: true, editBuffer: '' });
       
     } catch (error) {
       console.error(error);
       alert("Błąd przetwarzania algorytmu AI: " + error.message);
-      toggleDetails(null, null); // Zamknij podgląd w razie błędu
+      toggleDetails(null, null);
     }
   }
 
