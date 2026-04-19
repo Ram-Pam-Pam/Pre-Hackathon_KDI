@@ -12,6 +12,10 @@ import zipfile
 import io
 from fastapi.responses import StreamingResponse
 
+import cv2
+import numpy as np
+from fastapi import Response
+
 app = FastAPI(
     title="The Data Refinery API",
     version="0.1.0"
@@ -170,3 +174,45 @@ async def download_batch(request: BatchDownloadRequest):
         media_type="application/zip", 
         headers={"Content-Disposition": "attachment; filename=secured_vault.zip"}
     )
+
+# --- OPENCV: AUTOMATYCZNE ZAMAZYWANIE TWARZY ---
+
+# Wczytujemy darmowy, wbudowany model Haar Cascade do detekcji twarzy od przodu
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+@app.post("/api/redact-face")
+async def redact_face(file: UploadFile = File(...)):
+    # 1. Wczytanie pliku jako strumień bajtów
+    contents = await file.read()
+    
+    # 2. Zamiana bajtów na tablicę matematyczną zrozumiałą dla OpenCV (Numpy)
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if img is None:
+        raise HTTPException(status_code=400, detail="Nie udało się zdekodować obrazu. Upewnij się, że to poprawny plik JPG/PNG.")
+        
+    # 3. Model lepiej i szybciej radzi sobie na obrazach czarno-białych, więc robimy wirtualną kopię
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # 4. Magia AI: Wykrywanie twarzy
+    # scaleFactor i minNeighbors to parametry czułości - możesz je dostroić!
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    
+    # 5. Rysujemy czarne prostokąty (0, 0, 0) o współrzędnych twarzy na oryginalnym, kolorowym zdjęciu
+    # -1 oznacza "wypełnij figurę całkowicie"
+    for (x, y, w, h) in faces:
+        cv2.rectangle(img, (x, y), (x+w, y+h), (0, 0, 0), -1)
+        
+    # 6. Kodowanie obrazka z powrotem do formatu przesyłanego w internecie
+    ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'jpg'
+    encode_ext = f'.{ext}' if ext in ['png', 'jpg', 'jpeg'] else '.jpg'
+    
+    success, encoded_img = cv2.imencode(encode_ext, img)
+    if not success:
+        raise HTTPException(status_code=500, detail="Błąd przy kodowaniu zamazanego obrazu.")
+        
+    media_type = f"image/{'png' if encode_ext == '.png' else 'jpeg'}"
+    
+    # 7. Odpowiedź (Zwracamy surowy, zamazany plik wprost do frontendu)
+    return Response(content=encoded_img.tobytes(), media_type=media_type)
