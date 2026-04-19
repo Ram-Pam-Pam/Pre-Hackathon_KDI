@@ -7,9 +7,7 @@ import { supabase } from './supabase'
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function App() {
-  // ZMIANA: Zamiast jednego pliku, trzymamy tablicę plików
   const [selectedFiles, setSelectedFiles] = useState([])
-  
   const [status, setStatus] = useState({ type: 'idle', message: '' })
   const [fileList, setFileList] = useState([])
   const [kaijuMode, setKaijuMode] = useState(false)
@@ -24,7 +22,9 @@ function App() {
   const [editTool, setEditTool] = useState('brush') 
   const [editColor, setEditColor] = useState('#000000')
   const [canvasSnapshot, setCanvasSnapshot] = useState(null)
+  
   const [isDownloadingZip, setIsDownloadingZip] = useState(false)
+  const [isRedactingAll, setIsRedactingAll] = useState(false) // Nowy stan dla masowej redakcji
 
   // --- STANY SUPABASE AUTH ---
   const [user, setUser] = useState(null)
@@ -163,7 +163,6 @@ function App() {
     }
   }
 
-  // ZMIANA: Obsługa zaznaczania wielu plików z okienka
   const handleFileChange = (e) => {
     if (e.target.files?.length) {
       setSelectedFiles(Array.from(e.target.files))
@@ -174,7 +173,6 @@ function App() {
   const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true) }
   const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false) }
   
-  // ZMIANA: Obsługa upuszczania wielu plików (drag & drop)
   const handleDrop = (e) => {
     e.preventDefault()
     setIsDragging(false)
@@ -225,19 +223,108 @@ function App() {
     }
   }
 
-  const handleSaveEdit = async (fileName) => {
-    alert("W wersji w pełni serwerowej (Supabase), zapisywanie edycji grafiki wymaga stworzenia nowego obiektu Blob i nadpisania go w Supabase Storage. Ta funkcja została tymczasowo zablokowana by nie generować błędów.");
-    setPreviewContent({ ...previewContent, isEditing: false });
+  // --- ZAPISYWANIE EDYCJI (ZAMIANA PLIKU W CHMURZE) ---
+  const handleSaveEdit = async (fileRecord) => {
+    if (previewContent.type !== 'image' || !canvasRef.current) return;
+    
+    setPreviewContent(prev => ({ ...prev, data: 'Zapisywanie zmian w chmurze...' }));
+    
+    try {
+      canvasRef.current.toBlob(async (blob) => {
+        const newName = `redacted_${Date.now()}_${fileRecord.filename}`;
+        
+        // 1. Wgrywamy nową, zamazaną wersję do Supabase
+        await supabase.storage.from('vault').upload(newName, blob);
+        const { data: urlData } = supabase.storage.from('vault').getPublicUrl(newName);
+        
+        // 2. Podmieniamy URL w bazie danych
+        await supabase.from('files').update({ file_url: urlData.publicUrl }).eq('filename', fileRecord.filename);
+        
+        setPreviewContent({ type: 'image', data: urlData.publicUrl, isEditing: false, editBuffer: '' });
+        fetchFiles(); // Odśwież listę żeby mieć nowe linki
+      }, 'image/jpeg', 0.95);
+    } catch (error) {
+      console.error(error);
+      alert("Nie udało się zapisać zmian w bazie.");
+    }
   }
+
+  // --- POJEDYNCZA REDAKCJA AI OPENCV ---
+  const handleIndividualRedact = async (fileRecord) => {
+    setPreviewContent(prev => ({ ...prev, data: 'Wysyłanie do OpenCV...' }));
+    
+    try {
+      const response = await fetch(fileRecord.file_url);
+      const blob = await response.blob();
+      
+      const formData = new FormData();
+      formData.append('file', blob, fileRecord.filename);
+      
+      // Wysyłamy obraz do naszego Pythona!
+      const pyRes = await axios.post(`${API_URL}/api/redact-face`, formData, { responseType: 'blob' });
+      
+      // Odbieramy przerobiony plik i wyświetlamy na płótnie (Canvas) do wglądu
+      const newUrl = URL.createObjectURL(pyRes.data);
+      setPreviewContent({ type: 'image', data: newUrl, isEditing: true, editBuffer: '' });
+      
+    } catch (error) {
+      console.error(error);
+      alert("Błąd przetwarzania algorytmu AI: " + error.message);
+      toggleDetails(null, null); // Zamknij podgląd w razie błędu
+    }
+  }
+
+  // --- MASOWA REDAKCJA AI OPENCV (REDACT ALL FACES) ---
+  const handleRedactAllFaces = async () => {
+    const imageFiles = fileList.filter(f => ['jpg', 'jpeg', 'png'].includes(f.extension));
+    
+    if (imageFiles.length === 0) {
+      alert("Brak obrazów do przetworzenia w krypcie.");
+      return;
+    }
+    
+    if (!window.confirm(`Czy na pewno chcesz wysłać ${imageFiles.length} obrazów do algorytmu OpenCV i nadpisać je w bazie?`)) return;
+
+    setIsRedactingAll(true);
+    let success = 0;
+    
+    for (const f of imageFiles) {
+       try {
+         // Pobierz obecny plik z Supabase
+         const response = await fetch(f.file_url);
+         const blob = await response.blob();
+         
+         // Wyślij do backendu Pythona
+         const formData = new FormData();
+         formData.append('file', blob, f.filename);
+         const pyRes = await axios.post(`${API_URL}/api/redact-face`, formData, { responseType: 'blob' });
+         const newBlob = pyRes.data;
+         
+         // Wgraj nowy plik do Supabase
+         const newName = `ai_redacted_${Date.now()}_${f.filename}`;
+         await supabase.storage.from('vault').upload(newName, newBlob);
+         const { data: urlData } = supabase.storage.from('vault').getPublicUrl(newName);
+         
+         // Zaktualizuj bazę danych dla tego pliku
+         await supabase.from('files').update({ file_url: urlData.publicUrl }).eq('id', f.id);
+         success++;
+       } catch (err) {
+         console.error(`Błąd przy pliku ${f.filename}:`, err);
+       }
+    }
+    
+    setIsRedactingAll(false);
+    alert(`Zakończono! Pomyślnie zamazano twarze na ${success}/${imageFiles.length} obrazach.`);
+    fetchFiles();
+  };
+
 
   const handleDelete = async (fileRecord) => {
     const fileName = fileRecord.filename || fileRecord; 
-    
     if (!window.confirm(`Are you sure you want to delete ${fileName}?`)) return;
 
     try {
       await supabase.from('files').delete().eq('filename', fileName);
-      
       setFileList(prev => prev.filter(f => f.filename !== fileName));
       setApprovedFiles(prev => {
         const next = new Set(prev);
@@ -258,7 +345,6 @@ function App() {
 
   const handleDownloadAll = async () => {
     if (approvedFiles.size === 0) return;
-    
     setIsDownloadingZip(true);
 
     try {
@@ -324,7 +410,6 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  // ZMIANA: Pętla wgrywająca wszystkie wybrane pliki i zapisująca do nich user_id
   const handleUpload = async () => {
     if (selectedFiles.length === 0) return
 
@@ -338,7 +423,7 @@ function App() {
         const formData = new FormData()
         formData.append('file', currentFile)
 
-        // 1. Backend sprawdza plik
+        // 1. Backend sprawdza plik (wirusy / magia)
         await axios.post(`${API_URL}/api/upload`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         })
@@ -357,7 +442,7 @@ function App() {
           size_kb: Math.round(currentFile.size / 1024),
           extension: fileExt,
           file_url: urlData.publicUrl,
-          user_id: user.id // <--- Izolacja danych na konkretnego użytkownika!
+          user_id: user.id
         }])
         
         if (dbError) throw dbError
@@ -524,6 +609,18 @@ function App() {
               <div className="header-actions">
                 <span className="badge-success">{fileList.length} Files</span>
                 
+                {/* NOWY PRZYCISK: GLOBALNY REDACT OPENCV */}
+                {fileList.filter(f => ['jpg', 'jpeg', 'png'].includes(f.extension)).length > 0 && (
+                  <button 
+                    className="btn-export" 
+                    onClick={handleRedactAllFaces}
+                    disabled={isRedactingAll}
+                    style={{ backgroundColor: '#1e293b', borderColor: '#38bdf8', color: '#38bdf8' }}
+                  >
+                    {isRedactingAll ? 'Redacting AI...' : 'Redact All Faces'}
+                  </button>
+                )}
+
                 {fileList.length > 0 && approvedFiles.size < fileList.length && (
                   <button className="btn-approve-all" onClick={handleApproveAll}>
                     Approve All
@@ -621,7 +718,7 @@ function App() {
                                   <div className="preview-section">
                                     <span className="detail-label">Sanitized Data Preview</span>
                                     <div className="preview-container">
-                                      {previewContent.type === 'loading' && <span className="preview-text">Loading preview...</span>}
+                                      {previewContent.type === 'loading' && <span className="preview-text">{previewContent.data}</span>}
                                       {previewContent.type === 'error' && <span className="preview-text error">{previewContent.data}</span>}
                                       
                                       {previewContent.type === 'text' && (
@@ -635,7 +732,7 @@ function App() {
                                               />
                                               <div className="editor-actions">
                                                 <button className="action-btn" onClick={() => setPreviewContent({ ...previewContent, isEditing: false })}>Cancel</button>
-                                                <button className="action-btn approve-btn" onClick={() => handleSaveEdit(fileName)}>Save Changes</button>
+                                                <button className="action-btn approve-btn" onClick={() => handleSaveEdit(f)}>Save Changes</button>
                                               </div>
                                             </>
                                           ) : (
@@ -681,14 +778,26 @@ function App() {
                                               </div>
                                               <div className="editor-actions">
                                                 <button className="action-btn" onClick={() => setPreviewContent({ ...previewContent, isEditing: false })}>Cancel</button>
-                                                <button className="action-btn approve-btn" onClick={() => handleSaveEdit(fileName)}>Save Changes</button>
+                                                <button className="action-btn approve-btn" onClick={() => handleSaveEdit(f)}>Save Changes</button>
                                               </div>
                                             </>
                                           ) : (
                                             <>
+                                              {/* Podgląd normalnego obrazka */}
                                               <img src={previewContent.data} alt="Preview" className="preview-image" />
-                                              <div className="editor-actions">
-                                                <button className="action-btn" onClick={() => setPreviewContent({ ...previewContent, isEditing: true })}>Edit Image (Redact)</button>
+                                              <div className="editor-actions" style={{ display: 'flex', gap: '10px' }}>
+                                                <button className="action-btn" onClick={() => setPreviewContent({ ...previewContent, isEditing: true })}>
+                                                  Manual Redact (Canvas)
+                                                </button>
+                                                
+                                                {/* NOWY PRZYCISK: INDYWIDUALNY OPENCV REDACT */}
+                                                <button 
+                                                  className="action-btn" 
+                                                  style={{ borderColor: '#38bdf8', color: '#38bdf8' }} 
+                                                  onClick={() => handleIndividualRedact(f)}
+                                                >
+                                                  AI Face Redact (OpenCV)
+                                                </button>
                                               </div>
                                             </>
                                           )}
