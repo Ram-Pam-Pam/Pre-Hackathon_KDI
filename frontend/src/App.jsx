@@ -7,7 +7,9 @@ import { supabase } from './supabase'
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function App() {
-  const [file, setFile] = useState(null)
+  // ZMIANA: Zamiast jednego pliku, trzymamy tablicę plików
+  const [selectedFiles, setSelectedFiles] = useState([])
+  
   const [status, setStatus] = useState({ type: 'idle', message: '' })
   const [fileList, setFileList] = useState([])
   const [kaijuMode, setKaijuMode] = useState(false)
@@ -38,13 +40,11 @@ function App() {
 
   // --- LOGIKA SUPABASE AUTH ---
   useEffect(() => {
-    // Sprawdź, czy użytkownik jest już zalogowany przy starcie
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
       setIsAuthLoading(false)
     })
 
-    // Nasłuchuj zmian logowania/wylogowania
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
     })
@@ -77,7 +77,7 @@ function App() {
 
   // --- POBIERANIE PLIKÓW ---
   const fetchFiles = async () => {
-    if (!user) return; // Pobieraj tylko dla zalogowanego
+    if (!user) return; 
 
     try {
       const { data, error } = await supabase.from('files').select('*').order('created_at', { ascending: false })
@@ -163,20 +163,23 @@ function App() {
     }
   }
 
+  // ZMIANA: Obsługa zaznaczania wielu plików z okienka
   const handleFileChange = (e) => {
     if (e.target.files?.length) {
-      setFile(e.target.files[0])
+      setSelectedFiles(Array.from(e.target.files))
       setStatus({ type: 'idle', message: '' })
     }
   }
 
   const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true) }
   const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false) }
+  
+  // ZMIANA: Obsługa upuszczania wielu plików (drag & drop)
   const handleDrop = (e) => {
     e.preventDefault()
     setIsDragging(false)
     if (e.dataTransfer.files?.length) {
-      setFile(e.dataTransfer.files[0])
+      setSelectedFiles(Array.from(e.dataTransfer.files))
       setStatus({ type: 'idle', message: '' })
     }
   }
@@ -223,7 +226,6 @@ function App() {
   }
 
   const handleSaveEdit = async (fileName) => {
-    // Alert informacyjny dla dema
     alert("W wersji w pełni serwerowej (Supabase), zapisywanie edycji grafiki wymaga stworzenia nowego obiektu Blob i nadpisania go w Supabase Storage. Ta funkcja została tymczasowo zablokowana by nie generować błędów.");
     setPreviewContent({ ...previewContent, isEditing: false });
   }
@@ -253,7 +255,6 @@ function App() {
   const handleApprove = (fileName) => setApprovedFiles(prev => new Set(prev).add(fileName))
   const handleApproveAll = () => setApprovedFiles(new Set(fileList.map(f => f.filename || f)))
   const handleNoteChange = (fileName, text) => setFileNotes(prev => ({ ...prev, [fileName]: text }))
-  const handleDownload = (fileRecord) => window.open(fileRecord.file_url, '_blank')
 
   const handleDownloadAll = async () => {
     if (approvedFiles.size === 0) return;
@@ -264,24 +265,17 @@ function App() {
       const zip = new JSZip();
       const filenames = Array.from(approvedFiles);
 
-      // Pobieramy każdy zatwierdzony plik z Supabase
       for (const fileName of filenames) {
         const fileRecord = fileList.find(f => (f.filename || f) === fileName);
         if (!fileRecord || !fileRecord.file_url) continue;
 
-        // Fetchujemy plik z chmury jako Blob (surowe dane)
         const response = await fetch(fileRecord.file_url);
         if (!response.ok) throw new Error(`Nie udało się pobrać ${fileName}`);
         const blob = await response.blob();
-
-        // Dodajemy plik do wirtualnej paczki ZIP
         zip.file(fileName, blob);
       }
 
-      // Generujemy gotową paczkę
       const zipContent = await zip.generateAsync({ type: 'blob' });
-      
-      // Tworzymy ukryty link i wymuszamy pobieranie na komputer
       const url = URL.createObjectURL(zipContent);
       const link = document.createElement('a');
       link.href = url;
@@ -330,49 +324,61 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  // ZMIANA: Pętla wgrywająca wszystkie wybrane pliki i zapisująca do nich user_id
   const handleUpload = async () => {
-    if (!file) return
+    if (selectedFiles.length === 0) return
 
-    const formData = new FormData()
-    formData.append('file', file)
-    setStatus({ type: 'loading', message: 'Analyzing payload...' })
+    setStatus({ type: 'loading', message: `Analizowanie ${selectedFiles.length} plików...` })
 
-    try {
-      // 1. Backend sprawdza plik (wirusy itp)
-      await axios.post(`${API_URL}/api/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
-      
-      setStatus({ type: 'loading', message: 'Payload secured. Uploading to Supabase Vault...' })
+    let successCount = 0;
+    let errors = [];
 
-      // 2. Upload do Supabase
-      const fileExt = file.name.split('.').pop().toLowerCase()
-      const filePath = `${Date.now()}_${file.name}`
-      const { error: uploadError } = await supabase.storage.from('vault').upload(filePath, file)
-      if (uploadError) throw uploadError
+    for (const currentFile of selectedFiles) {
+      try {
+        const formData = new FormData()
+        formData.append('file', currentFile)
 
-      // 3. Link i wpis do bazy
-      const { data: urlData } = supabase.storage.from('vault').getPublicUrl(filePath)
-      const { error: dbError } = await supabase.from('files').insert([{
-        filename: file.name,
-        size_kb: Math.round(file.size / 1024),
-        extension: fileExt,
-        file_url: urlData.publicUrl,
-        user_id: user.id
-      }])
-      
-      if (dbError) throw dbError
+        // 1. Backend sprawdza plik
+        await axios.post(`${API_URL}/api/upload`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        })
 
-      setStatus({ type: 'success', message: 'Payload verified and locked!' })
-      setFile(null)
-      fetchFiles()
-    } catch (error) {
-      setStatus({ type: 'error', message: `Critical Threat: ${error.message}` })
-      console.error(error)
+        // 2. Upload do Supabase
+        const fileExt = currentFile.name.split('.').pop().toLowerCase()
+        const filePath = `${Date.now()}_${currentFile.name}`
+        const { error: uploadError } = await supabase.storage.from('vault').upload(filePath, currentFile)
+        
+        if (uploadError) throw uploadError
+
+        // 3. Wpis do bazy z autoryzacją użytkownika
+        const { data: urlData } = supabase.storage.from('vault').getPublicUrl(filePath)
+        const { error: dbError } = await supabase.from('files').insert([{
+          filename: currentFile.name,
+          size_kb: Math.round(currentFile.size / 1024),
+          extension: fileExt,
+          file_url: urlData.publicUrl,
+          user_id: user.id // <--- Izolacja danych na konkretnego użytkownika!
+        }])
+        
+        if (dbError) throw dbError
+        successCount++;
+
+      } catch (error) {
+        console.error(`Błąd wgrywania pliku ${currentFile.name}:`, error);
+        errors.push(currentFile.name);
+      }
     }
+
+    if (errors.length > 0) {
+      setStatus({ type: 'error', message: `Wgrano: ${successCount}. Błędy dla: ${errors.join(', ')}` })
+    } else {
+      setStatus({ type: 'success', message: `Pomyślnie zweryfikowano i wgrano ${successCount} plików!` })
+    }
+
+    setSelectedFiles([])
+    fetchFiles()
   }
 
-  // --- EKRAN BRAMY DOSTĘPOWEJ (LOGOWANIE SUPABASE) ---
   if (isAuthLoading) {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: 'white' }}>Ładowanie sesji...</div>
   }
@@ -469,7 +475,7 @@ function App() {
         <main className="main-content">
           <div className="card upload-section">
             <div 
-              className={`drop-zone ${file ? 'has-file' : ''} ${isDragging ? 'dragging' : ''}`} 
+              className={`drop-zone ${selectedFiles.length > 0 ? 'has-file' : ''} ${isDragging ? 'dragging' : ''}`} 
               onClick={triggerFileInput}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -480,6 +486,7 @@ function App() {
                 ref={fileInputRef} 
                 onChange={handleFileChange} 
                 accept=".pdf,.txt,.md,.csv,.svg,.jpg,.jpeg,.png"
+                multiple
                 style={{ display: 'none' }} 
               />
               
@@ -487,11 +494,11 @@ function App() {
                 <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
               </svg>
               
-              {file ? (
-                <span className="file-name">{file.name}</span>
+              {selectedFiles.length > 0 ? (
+                <span className="file-name">Wybrano {selectedFiles.length} plik(ów) do wgrania</span>
               ) : (
                 <span className="placeholder-text">
-                  {isDragging ? 'Drop payload here!' : 'Insert payload or drag and drop'}
+                  {isDragging ? 'Upuść ładunek tutaj!' : 'Wybierz lub upuść wiele plików naraz'}
                 </span>
               )}
             </div>
@@ -499,7 +506,7 @@ function App() {
             <button 
               className="btn-primary" 
               onClick={handleUpload} 
-              disabled={!file || status.type === 'loading'}
+              disabled={selectedFiles.length === 0 || status.type === 'loading'}
             >
               {status.type === 'loading' ? 'Processing...' : 'Execute Protocol'}
             </button>
