@@ -175,53 +175,80 @@ async def download_batch(request: BatchDownloadRequest):
         headers={"Content-Disposition": "attachment; filename=secured_vault.zip"}
     )
 
-# --- OPENCV: AGRESYWNE ZAMAZYWANIE TWARZY ---
+# --- OPENCV: INTELIGENTNE ZAMAZYWANIE TWARZY (ZOPTYMALIZOWANE) ---
 
-# Wczytujemy TRZY darmowe, wbudowane modele Haar Cascade dla maksymalnej skuteczności
+# Wczytujemy dwa najbardziej stabilne modele
 cascade_frontal = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 cascade_alt = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_alt2.xml')
-cascade_profile = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
 
 @app.post("/api/redact-face")
 async def redact_face(file: UploadFile = File(...)):
-    contents = await file.read()
-    nparr = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    
-    if img is None:
-        raise HTTPException(status_code=400, detail="Nie udało się zdekodować obrazu. Upewnij się, że to poprawny plik JPG/PNG.")
+    try:
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    
-    # Szukamy twarzy za pomocą 3 różnych modeli (agresywne parametry: scaleFactor=1.05 bada obraz bardzo gęsto)
-    faces_frontal = cascade_frontal.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=4, minSize=(20, 20))
-    faces_alt = cascade_alt.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=4, minSize=(20, 20))
-    faces_profile = cascade_profile.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=4, minSize=(20, 20))
-    
-    # Łączymy wszystkie wykrycia z trzech modeli w jedną listę
-    all_faces = list(faces_frontal) + list(faces_alt) + list(faces_profile)
-    
-    # Rysujemy czarne prostokąty z dodanym 15% marginesem, żeby przykryć dokładnie włosy i brodę
-    for (x, y, w, h) in all_faces:
-        margin_x = int(w * 0.15)
-        margin_y = int(h * 0.15)
+        if img is None:
+            raise HTTPException(status_code=400, detail="Nie udało się zdekodować obrazu. Upewnij się, że to poprawny plik JPG/PNG.")
+            
+        # Zapisujemy oryginał do późniejszego rysowania w pełnej rozdzielczości
+        original_img = img.copy()
         
-        # Zapobiegamy wyjściu współrzędnych poza rozmiar obrazka
-        x1 = max(0, x - margin_x)
-        y1 = max(0, y - margin_y)
-        x2 = min(img.shape[1], x + w + margin_x)
-        y2 = min(img.shape[0], y + h + margin_y)
+        # OPTYMALIZACJA: Zmniejszamy obraz wirtualnie TYLKO na potrzeby detekcji. 
+        # Chroni to darmowy serwer Render przed błędem "Out of Memory" (502 Bad Gateway)
+        max_width = 800
+        scale_ratio = 1.0
         
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 0), -1)
+        if img.shape[1] > max_width:
+            scale_ratio = max_width / img.shape[1]
+            new_width = max_width
+            new_height = int(img.shape[0] * scale_ratio)
+            detect_img = cv2.resize(img, (new_width, new_height))
+        else:
+            detect_img = img
+            
+        gray = cv2.cvtColor(detect_img, cv2.COLOR_BGR2GRAY)
         
-    ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'jpg'
-    encode_ext = f'.{ext}' if ext in ['png', 'jpg', 'jpeg'] else '.jpg'
-    
-    success, encoded_img = cv2.imencode(encode_ext, img)
-    if not success:
-        raise HTTPException(status_code=500, detail="Błąd przy kodowaniu zamazanego obrazu.")
+        # Szukamy twarzy za pomocą 2 modeli ze stabilnym scaleFactor=1.1
+        faces_frontal = cascade_frontal.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20))
+        faces_alt = cascade_alt.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20))
         
-    media_type = f"image/{'png' if encode_ext == '.png' else 'jpeg'}"
-    
-    from fastapi import Response # (Zostawiam profilaktycznie, gdyby brakowało na górze)
-    return Response(content=encoded_img.tobytes(), media_type=media_type)
+        all_faces = []
+        if len(faces_frontal) > 0: all_faces.extend(faces_frontal)
+        if len(faces_alt) > 0: all_faces.extend(faces_alt)
+        
+        # Rysujemy na ORYGINALNYM, DUŻYM obrazie
+        for (x, y, w, h) in all_faces:
+            # Przeliczamy wirtualne koordynaty z powrotem na prawdziwy rozmiar zdjęcia
+            orig_x = int(x / scale_ratio)
+            orig_y = int(y / scale_ratio)
+            orig_w = int(w / scale_ratio)
+            orig_h = int(h / scale_ratio)
+            
+            # Dodajemy bezpieczny margines (15%)
+            margin_x = int(orig_w * 0.15)
+            margin_y = int(orig_h * 0.15)
+            
+            x1 = max(0, orig_x - margin_x)
+            y1 = max(0, orig_y - margin_y)
+            x2 = min(original_img.shape[1], orig_x + orig_w + margin_x)
+            y2 = min(original_img.shape[0], orig_y + orig_h + margin_y)
+            
+            cv2.rectangle(original_img, (x1, y1), (x2, y2), (0, 0, 0), -1)
+            
+        ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'jpg'
+        encode_ext = f'.{ext}' if ext in ['png', 'jpg', 'jpeg'] else '.jpg'
+        
+        success, encoded_img = cv2.imencode(encode_ext, original_img)
+        if not success:
+            raise HTTPException(status_code=500, detail="Błąd przy kodowaniu zamazanego obrazu.")
+            
+        media_type = f"image/{'png' if encode_ext == '.png' else 'jpeg'}"
+        
+        from fastapi import Response 
+        return Response(content=encoded_img.tobytes(), media_type=media_type)
+
+    except Exception as e:
+        print(f"AI Redact Error: {e}")
+        # Jeśli coś pójdzie nie tak, zwracamy ładny błąd zamiast wywalać serwer (502)
+        raise HTTPException(status_code=500, detail=str(e))
