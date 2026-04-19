@@ -186,7 +186,8 @@ function App() {
   const toggleKaijuMode = () => setKaijuMode(!kaijuMode)
 
   const toggleDetails = async (index, fileRecord) => {
-    if (expandedRow === index) {
+    // DODANO: Zabezpieczenie || !fileRecord
+    if (expandedRow === index || !fileRecord) {
       setExpandedRow(null)
       setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' })
       return
@@ -251,7 +252,6 @@ function App() {
 
   // --- POJEDYNCZA REDAKCJA AI OPENCV ---
   const handleIndividualRedact = async (fileRecord) => {
-    // POPRAWKA: Ustawiamy type na 'loading' zamiast podmieniać link do obrazka na tekst!
     setPreviewContent({ type: 'loading', data: 'AI Processing: Wysłano ładunek do OpenCV...', isEditing: false, editBuffer: '' });
     
     try {
@@ -269,7 +269,10 @@ function App() {
     } catch (error) {
       console.error(error);
       alert("Błąd przetwarzania algorytmu AI: " + error.message);
-      toggleDetails(null, null);
+      
+      // ZMIANA: Bezpieczne zamknięcie okienka zamiast toggleDetails(null, null)
+      setExpandedRow(null);
+      setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' });
     }
   }
 
