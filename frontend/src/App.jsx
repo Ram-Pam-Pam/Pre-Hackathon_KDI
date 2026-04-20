@@ -254,27 +254,42 @@ function App() {
     }
   }
 
-  // --- POJEDYNCZA REDAKCJA AI OPENCV ---
+  // --- POJEDYNCZA REDAKCJA AI OPENCV (Z AUTOMATYCZNYM ZAPISEM) ---
   const handleIndividualRedact = async (fileRecord) => {
     setPreviewContent({ type: 'loading', data: 'AI Processing: Wysłano ładunek do OpenCV...', isEditing: false, editBuffer: '' });
     
     try {
+      // 1. Pobieramy plik z Supabase
       const response = await fetch(fileRecord.file_url);
       const blob = await response.blob();
       
       const formData = new FormData();
       formData.append('file', blob, fileRecord.filename);
       
+      // 2. Wysyłamy do backendu z OpenCV
       const pyRes = await axios.post(`${API_URL}/api/redact-face`, formData, { responseType: 'blob' });
+      const newBlob = pyRes.data;
+
+      // Zmieniamy komunikat na zapisywanie
+      setPreviewContent({ type: 'loading', data: 'Zapisywanie nowej wersji w bazie Supabase...', isEditing: false, editBuffer: '' });
       
-      const newUrl = URL.createObjectURL(pyRes.data);
-      setPreviewContent({ type: 'image', data: newUrl, isEditing: true, editBuffer: '' });
+      // 3. Wgrywamy nową, przetworzoną wersję do chmury
+      const newName = `ai_redacted_${Date.now()}_${fileRecord.filename}`;
+      await supabase.storage.from('vault').upload(newName, newBlob);
+      const { data: urlData } = supabase.storage.from('vault').getPublicUrl(newName);
+      
+      // 4. Podmieniamy oryginalny link w bazie danych na nowy zamazany plik
+      await supabase.from('files').update({ file_url: urlData.publicUrl }).eq('id', fileRecord.id);
+      
+      // 5. Wyświetlamy już na stałe podmieniony plik i odświeżamy tabelę
+      setPreviewContent({ type: 'image', data: urlData.publicUrl, isEditing: false, editBuffer: '' });
+      fetchFiles(); 
       
     } catch (error) {
       console.error(error);
       alert("Błąd przetwarzania algorytmu AI: " + error.message);
       
-      // ZMIANA: Bezpieczne zamknięcie okienka zamiast toggleDetails(null, null)
+      // Bezpieczne zamknięcie w razie błędu
       setExpandedRow(null);
       setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' });
     }
