@@ -228,7 +228,8 @@ function App() {
   const handleSaveEdit = async (fileRecord) => {
     if (previewContent.type !== 'image' || !canvasRef.current) return;
     
-    setPreviewContent(prev => ({ ...prev, data: 'Zapisywanie zmian w chmurze...' }));
+    // POPRAWKA: Zmiana type na 'loading' zamiast samego data!
+    setPreviewContent({ type: 'loading', data: 'Zapisywanie zmian w chmurze...', isEditing: false, editBuffer: '' });
     
     try {
       canvasRef.current.toBlob(async (blob) => {
@@ -247,6 +248,9 @@ function App() {
     } catch (error) {
       console.error(error);
       alert("Nie udało się zapisać zmian w bazie.");
+      // W razie błędu przywracamy stan początkowy by okno nie zawisło na "loading"
+      setExpandedRow(null);
+      setPreviewContent({ type: 'idle', data: null, isEditing: false, editBuffer: '' });
     }
   }
 
